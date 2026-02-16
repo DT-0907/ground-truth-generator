@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review: {{ session.video_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container review-container">
+        <header>
+            <h1>📹 {{ session.video_name }}</h1>
+            <div class="header-actions">
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Sessions</a>
+                <button id="saveBtn" class="btn btn-success">💾 Save Annotations</button>
+            </div>
+        </header>
+
+        <div class="review-layout">
+            <!-- Video Player -->
+            <div class="video-panel">
+                <div class="video-container">
+                    <video id="videoPlayer" controls>
+                        <source src="{{ url_for('serve_data', filename=session.video_path) }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <canvas id="overlayCanvas"></canvas>
+                </div>
+                <div class="video-controls">
+                    <div class="frame-info">
+                        <span>Frame: <span id="currentFrame">0</span> / <span id="totalFrames">0</span></span>
+                        <span>Time: <span id="currentTime">0:00</span></span>
+                    </div>
+                    <div class="playback-controls">
+                        <button id="prevFrame" class="btn btn-sm">⏮ Prev Frame</button>
+                        <button id="playPause" class="btn btn-sm">▶ Play</button>
+                        <button id="nextFrame" class="btn btn-sm">Next Frame ⏭</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Track List Panel -->
+            <div class="tracks-panel">
+                <h2>Tracks</h2>
+                <div class="tracks-controls">
+                    <input type="text" id="filterTracks" placeholder="Filter tracks..." class="input">
+                    <select id="sortTracks" class="select">
+                        <option value="id">Sort by ID</option>
+                        <option value="class">Sort by Class</option>
+                        <option value="confidence">Sort by Confidence</option>
+                        <option value="length">Sort by Length</option>
+                    </select>
+                </div>
+                <div id="tracksList" class="tracks-list">
+                    <p class="loading">Loading tracks...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Track Actions Panel -->
+        <div class="actions-panel">
+            <h3>Track Actions</h3>
+            <div class="action-buttons">
+                <button id="deleteTrack" class="btn btn-danger" disabled>🗑 Delete Track (D)</button>
+                <button id="changeClass" class="btn btn-warning" disabled>🏷 Change Class (C)</button>
+                <button id="splitTrack" class="btn btn-info" disabled>✂ Split Track (S)</button>
+                <button id="mergeTrack" class="btn btn-primary" disabled>🔗 Merge Tracks (M)</button>
+            </div>
+            <div id="selectedTrackInfo" class="selected-info">
+                <p>No track selected. Click a track in the list to select it.</p>
+            </div>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script>
+        // Initialize with session data
+        const SESSION_ID = '{{ session.id }}';
+        const VIDEO_PATH = '{{ session.video_path }}';
+        const TRACK_PATH = '{{ session.track_path }}';
+        
+        // Start app when page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            if (typeof initReviewApp === 'function') {
+                initReviewApp(SESSION_ID, VIDEO_PATH, TRACK_PATH);
+            }
+        });
+    </script>
+</body>
+</html>
+

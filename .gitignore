@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+build_venv/
+
+# Data files (large)
+data/videos/
+data/tracks/
+data/corrections/
+data/exports/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.pt
+*.onnx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Build artifacts
+software/dist/
+software/build/
+software/build_venv/
+software2/dist/
+software2/build/
+software2/build_venv/
+
+# Test data
+test/data/videos/
+test/data/tracks/
+test/data/corrections/
+test/data/exports/
+test/venv/
+test/models/
+
+# Claude work
+claude-work/venv/
+claude-work/data/

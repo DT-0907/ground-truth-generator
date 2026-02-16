@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Track Correction</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            color: #fff;
+        }
+        .mode-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .mode-badge.local { background: #555; color: #ccc; }
+        .mode-badge.nas { background: #3498db; color: #fff; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 2px solid #2d3a5a;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            color: #888;
+            font-size: 14px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: #ccc; }
+        .tab.active {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            flex: 1;
+        }
+        .stat-card h3 { color: #888; font-size: 12px; text-transform: uppercase; }
+        .stat-card .value { font-size: 32px; font-weight: bold; color: #4ecca3; }
+
+        /* Session list */
+        .sessions-list { display: flex; flex-direction: column; gap: 10px; }
+        .session-card {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .session-card:hover { background: #1f2b4d; }
+        .session-info h3 { font-size: 16px; margin-bottom: 5px; }
+        .session-meta { color: #888; font-size: 13px; }
+        .session-meta span { margin-right: 15px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-review { background: #f39c12; color: #000; }
+        .badge-done { background: #4ecca3; color: #000; }
+        .badge-missing { background: #e74c3c; color: #fff; }
+        .badge-processing { background: #3498db; color: #fff; }
+        .badge-error { background: #e74c3c; color: #fff; }
+        .badge-unprocessed { background: #555; color: #ccc; }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary { background: #4ecca3; color: #000; }
+        .btn-primary:hover { background: #3db892; }
+        .btn-process { background: #3498db; color: #fff; }
+        .btn-process:hover { background: #2980b9; }
+        .btn-export { background: #9b59b6; color: #fff; }
+        .btn-export:hover { background: #8e44ad; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-sm { padding: 6px 14px; font-size: 12px; }
+        .btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+
+        /* Video grid */
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+        }
+        .video-card {
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, background 0.2s;
+        }
+        .video-card:hover { background: #1f2b4d; transform: translateY(-2px); }
+        .video-thumb {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            background: #0a0a1a;
+            display: block;
+        }
+        .video-card-body {
+            padding: 14px 16px;
+        }
+        .video-card-body h3 {
+            font-size: 14px;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .video-folder {
+            color: #666;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+        .video-meta {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+        }
+        .video-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .video-actions .badge { font-size: 10px; }
+
+        /* Progress bar */
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #2d3a5a;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: #3498db;
+            border-radius: 2px;
+            transition: width 0.3s;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* Process options */
+        .process-options {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .process-options label {
+            font-size: 12px;
+            color: #888;
+        }
+        .process-options select, .process-options input {
+            padding: 6px 10px;
+            background: #16213e;
+            border: 1px solid #2d3a5a;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        .empty-state h2 { margin-bottom: 10px; color: #aaa; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #4ecca3;
+            color: #000;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { background: #e74c3c; color: #fff; }
+
+        /* Settings form */
+        .settings-panel {
+            max-width: 560px;
+        }
+        .settings-panel h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #ccc;
+        }
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            background: #16213e;
+            border: 1px solid #2d3a5a;
+            color: #fff;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            border-color: #4ecca3;
+        }
+        .form-group input::placeholder {
+            color: #555;
+        }
+        .form-row {
+            display: flex;
+            gap: 12px;
+        }
+        .form-row .form-group { flex: 1; }
+        .settings-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .nas-status-box {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .nas-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .nas-status-dot.connected { background: #4ecca3; }
+        .nas-status-dot.disconnected { background: #555; }
+        .nas-status-text {
+            font-size: 13px;
+            color: #aaa;
+        }
+        .nas-status-text strong {
+            color: #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Vehicle Track Correction</h1>
+            <span class="mode-badge local" id="modeBadge">Local</span>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="sessions">Sessions</div>
+            <div class="tab" data-tab="videos">Videos</div>
+            <div class="tab" data-tab="settings">Settings</div>
+        </div>
+
+        <!-- SESSIONS TAB (existing) -->
+        <div class="tab-content active" id="tab-sessions">
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>Total Sessions</h3>
+                    <div class="value">{{ sessions|length }}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Need Review</h3>
+                    <div class="value">{{ sessions|selectattr('needs_review')|list|length }}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Corrected</h3>
+                    <div class="value">{{ sessions|selectattr('has_corrections')|list|length }}</div>
+                </div>
+            </div>
+
+            {% if sessions %}
+            <div class="sessions-list">
+                {% for session in sessions %}
+                <div class="session-card">
+                    <div class="session-info">
+                        <h3>{{ session.video_name or session.id }}</h3>
+                        <div class="session-meta">
+                            <span>{{ session.track_count }} tracks</span>
+                            {% if session.needs_review > 0 %}
+                            <span class="badge badge-review">{{ session.needs_review }} need review</span>
+                            {% endif %}
+                            {% if session.has_corrections %}
+                            <span class="badge badge-done">Corrected</span>
+                            {% endif %}
+                            {% if not session.video_exists %}
+                            <span class="badge badge-missing">Video missing</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <a href="/review/{{ session.id }}" class="btn btn-primary" {% if not session.video_exists %}disabled{% endif %}>
+                        Review
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <h2>No sessions yet</h2>
+                <p>Go to the Videos tab to process your first video.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- VIDEOS TAB -->
+        <div class="tab-content" id="tab-videos">
+            <div class="stats" id="videoStats">
+                <div class="stat-card">
+                    <h3>Total Videos</h3>
+                    <div class="value" id="statTotal">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Processed</h3>
+                    <div class="value" id="statProcessed">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Unprocessed</h3>
+                    <div class="value" id="statUnprocessed">-</div>
+                </div>
+            </div>
+
+            <div class="process-options">
+                <label>Model:</label>
+                <select id="modelSelect">
+                    <option value="yolov8n.pt">YOLOv8n (fast)</option>
+                    <option value="yolov8s.pt">YOLOv8s (balanced)</option>
+                    <option value="yolov8m.pt" selected>YOLOv8m (accurate)</option>
+                </select>
+                <label>Confidence:</label>
+                <input type="number" id="confInput" value="0.25" min="0.05" max="0.95" step="0.05" style="width:70px;">
+                <button class="btn btn-process btn-sm" onclick="processAllUnprocessed()">Process All Unprocessed</button>
+            </div>
+
+            <div class="video-grid" id="videoGrid">
+                <div class="empty-state" style="grid-column:1/-1;">
+                    <p>Loading videos...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS TAB -->
+        <div class="tab-content" id="tab-settings">
+            <div class="settings-panel">
+                <h2>NAS Connection (Tailscale SMB)</h2>
+
+                <div class="nas-status-box" id="nasStatusBox">
+                    <div class="nas-status-dot disconnected" id="nasStatusDot"></div>
+                    <div class="nas-status-text" id="nasStatusText">
+                        <strong>Disconnected</strong> &mdash; Local mode
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Tailscale IP</label>
+                        <input type="text" id="nasIp" placeholder="100.x.x.x">
+                    </div>
+                    <div class="form-group">
+                        <label>Share Name</label>
+                        <input type="text" id="nasShare" placeholder="Videos">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="nasUser" placeholder="admin">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="nasPass" placeholder="password">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Mount Point (optional)</label>
+                    <input type="text" id="nasMountPoint" placeholder="/tmp/cctv_nas_mount">
+                </div>
+
+                <div class="settings-actions">
+                    <button class="btn btn-primary" id="nasConnectBtn" onclick="connectNas()">Connect</button>
+                    <button class="btn btn-danger" id="nasDisconnectBtn" onclick="disconnectNas()" style="display:none;">Disconnect</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+                if (tab.dataset.tab === 'videos') loadVideos();
+                if (tab.dataset.tab === 'settings') checkNasStatus();
+            };
+        });
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast show' + (isError ? ' error' : '');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // --- Mode indicator ---
+        function updateModeIndicator(mode, ip) {
+            const badge = document.getElementById('modeBadge');
+            if (mode === 'nas') {
+                badge.textContent = 'NAS: ' + (ip || 'connected');
+                badge.className = 'mode-badge nas';
+            } else {
+                badge.textContent = 'Local';
+                badge.className = 'mode-badge local';
+            }
+        }
+
+        // --- NAS Settings ---
+        async function checkNasStatus() {
+            try {
+                const [statusRes, configRes] = await Promise.all([
+                    fetch('/api/nas/status'),
+                    fetch('/api/nas/config')
+                ]);
+                const status = await statusRes.json();
+                const config = await configRes.json();
+
+                updateModeIndicator(status.mode, status.ip);
+
+                const dot = document.getElementById('nasStatusDot');
+                const text = document.getElementById('nasStatusText');
+                const connectBtn = document.getElementById('nasConnectBtn');
+                const disconnectBtn = document.getElementById('nasDisconnectBtn');
+
+                if (status.connected) {
+                    dot.className = 'nas-status-dot connected';
+                    text.innerHTML = `<strong>Connected</strong> &mdash; NAS at ${status.ip || '?'}/${status.share || '?'}`;
+                    connectBtn.style.display = 'none';
+                    disconnectBtn.style.display = '';
+                } else {
+                    dot.className = 'nas-status-dot disconnected';
+                    text.innerHTML = '<strong>Disconnected</strong> &mdash; Local mode';
+                    connectBtn.style.display = '';
+                    disconnectBtn.style.display = 'none';
+                }
+
+                // Pre-fill form from saved config
+                if (config.ip) document.getElementById('nasIp').value = config.ip;
+                if (config.share) document.getElementById('nasShare').value = config.share;
+                if (config.username) document.getElementById('nasUser').value = config.username;
+                if (config.mount_point) document.getElementById('nasMountPoint').value = config.mount_point;
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        async function connectNas() {
+            const ip = document.getElementById('nasIp').value.trim();
+            const share = document.getElementById('nasShare').value.trim();
+            const username = document.getElementById('nasUser').value.trim();
+            const password = document.getElementById('nasPass').value;
+            const mountPoint = document.getElementById('nasMountPoint').value.trim();
+
+            if (!ip || !share || !username || !password) {
+                showToast('All fields except mount point are required', true);
+                return;
+            }
+
+            const btn = document.getElementById('nasConnectBtn');
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+
+            try {
+                const res = await fetch('/api/nas/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ip, share, username, password, mount_point: mountPoint || undefined })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast(data.message);
+                    checkNasStatus();
+                } else {
+                    showToast(data.message || 'Connection failed', true);
+                }
+            } catch (e) {
+                showToast('Network error', true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Connect';
+            }
+        }
+
+        async function disconnectNas() {
+            try {
+                const res = await fetch('/api/nas/disconnect', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Disconnected from NAS');
+                    checkNasStatus();
+                } else {
+                    showToast('Disconnect failed', true);
+                }
+            } catch (e) {
+                showToast('Network error', true);
+            }
+        }
+
+        // --- Videos ---
+        let pollingIntervals = {};
+
+        async function loadVideos() {
+            try {
+                const res = await fetch('/api/videos');
+                const videos = await res.json();
+                renderVideoGrid(videos);
+                updateVideoStats(videos);
+            } catch (e) {
+                showToast('Failed to load videos', true);
+            }
+        }
+
+        function updateVideoStats(videos) {
+            document.getElementById('statTotal').textContent = videos.length;
+            document.getElementById('statProcessed').textContent = videos.filter(v => v.status === 'processed' || v.status === 'done').length;
+            document.getElementById('statUnprocessed').textContent = videos.filter(v => v.status === 'unprocessed').length;
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '?';
+            const m = Math.floor(seconds / 60);
+            const s = Math.round(seconds % 60);
+            return m > 0 ? `${m}m ${s}s` : `${s}s`;
+        }
+
+        function renderVideoGrid(videos) {
+            const grid = document.getElementById('videoGrid');
+
+            if (videos.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state" style="grid-column:1/-1;">
+                        <h2>No videos found</h2>
+                        <p>Add video files (.mp4, .mov, .avi, .mkv) to <code>data/videos/</code> or connect a NAS.</p>
+                    </div>`;
+                return;
+            }
+
+            grid.innerHTML = videos.map(v => {
+                const statusBadge = getStatusBadge(v);
+                const actionBtn = getActionButton(v);
+                const progressBar = v.status === 'processing'
+                    ? `<div class="progress-bar"><div class="fill" style="width:100%"></div></div>` : '';
+                const folderLine = v.folder ? `<div class="video-folder">${v.folder}</div>` : '';
+
+                return `
+                <div class="video-card" data-session="${v.session_id}" data-status="${v.status}">
+                    <img class="video-thumb" src="/api/videos/thumbnail/${encodeURIComponent(v.session_id)}" alt="${v.display_name || v.name}" loading="lazy">
+                    <div class="video-card-body">
+                        <h3>${v.display_name || v.name}</h3>
+                        ${folderLine}
+                        <div class="video-meta">
+                            <span>${v.size_mb} MB</span>
+                            <span>${v.resolution}</span>
+                            <span>${formatDuration(v.duration)}</span>
+                            <span>${v.total_frames} frames</span>
+                        </div>
+                        <div class="video-actions">
+                            ${actionBtn}
+                            ${statusBadge}
+                        </div>
+                        ${progressBar}
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Start polling for any currently processing videos
+            videos.filter(v => v.status === 'processing').forEach(v => startPolling(v.session_id));
+            // Start polling for any currently exporting videos
+            videos.filter(v => v.export_status === 'exporting').forEach(v => startExportPolling(v.session_id));
+        }
+
+        function getStatusBadge(v) {
+            if (v.status === 'processing') return '<span class="badge badge-processing">Processing...</span>';
+            if (v.status === 'error') return '<span class="badge badge-error">Error</span>';
+            if (v.status === 'processed' || v.status === 'done') {
+                let badges = `<span class="badge badge-done">${v.track_count} tracks</span>`;
+                if (v.has_corrections) badges += ' <span class="badge badge-done">Corrected</span>';
+                if (v.export_status === 'exporting') badges += ' <span class="badge badge-processing">Exporting...</span>';
+                else if (v.export_status === 'exported' && v.export_count > 0) badges += ` <span class="badge" style="background:#9b59b6;color:#fff;">${v.export_count} images</span>`;
+                return badges;
+            }
+            return '<span class="badge badge-unprocessed">Unprocessed</span>';
+        }
+
+        function getActionButton(v) {
+            const sid = v.session_id;
+            if (v.status === 'processing') {
+                return `<button class="btn btn-sm" disabled>Processing...</button>`;
+            }
+            if (v.status === 'processed' || v.status === 'done') {
+                let btns = `<a href="/review/${sid}" class="btn btn-primary btn-sm">Review</a>`;
+                if (v.export_status === 'exporting') {
+                    btns += ` <button class="btn btn-sm btn-export" disabled>Exporting...</button>`;
+                } else {
+                    const exportLabel = (v.export_status === 'exported' && v.export_count > 0) ? 'Re-export' : 'Export';
+                    btns += ` <button class="btn btn-sm btn-export" onclick="exportVideo('${sid}')">${exportLabel}</button>`;
+                }
+                btns += ` <button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Reprocess</button>`;
+                return btns;
+            }
+            if (v.status === 'error') {
+                return `<button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Retry</button>`;
+            }
+            return `<button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Process</button>`;
+        }
+
+        async function processVideo(sessionId) {
+            const model = document.getElementById('modelSelect').value;
+            const conf = parseFloat(document.getElementById('confInput').value) || 0.25;
+
+            try {
+                const res = await fetch('/api/videos/process', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sessionId, model, conf })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showToast(`Processing started: ${sessionId}`);
+                    // Update card immediately
+                    const card = document.querySelector(`[data-session="${sessionId}"]`);
+                    if (card) {
+                        card.dataset.status = 'processing';
+                        const body = card.querySelector('.video-card-body');
+                        const actions = card.querySelector('.video-actions');
+                        actions.innerHTML = `<button class="btn btn-sm" disabled>Processing...</button> <span class="badge badge-processing">Processing...</span>`;
+                        if (!card.querySelector('.progress-bar')) {
+                            const pb = document.createElement('div');
+                            pb.className = 'progress-bar';
+                            pb.innerHTML = '<div class="fill" style="width:100%"></div>';
+                            body.appendChild(pb);
+                        }
+                    }
+                    startPolling(sessionId);
+                } else {
+                    showToast(data.error || 'Failed to start processing', true);
+                }
+            } catch (e) {
+                showToast('Network error', true);
+            }
+        }
+
+        function startPolling(sessionId) {
+            if (pollingIntervals[sessionId]) return;
+
+            pollingIntervals[sessionId] = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/videos/status/${encodeURIComponent(sessionId)}`);
+                    const status = await res.json();
+
+                    if (status.status === 'done') {
+                        clearInterval(pollingIntervals[sessionId]);
+                        delete pollingIntervals[sessionId];
+                        showToast(`Done: ${sessionId}`);
+                        loadVideos();
+                    } else if (status.status === 'error') {
+                        clearInterval(pollingIntervals[sessionId]);
+                        delete pollingIntervals[sessionId];
+                        showToast(`Error processing ${sessionId}: ${status.error}`, true);
+                        loadVideos();
+                    }
+                } catch (e) {
+                    // Ignore transient errors
+                }
+            }, 2000);
+        }
+
+        async function processAllUnprocessed() {
+            try {
+                const res = await fetch('/api/videos');
+                const videos = await res.json();
+                const unprocessed = videos.filter(v => v.status === 'unprocessed');
+
+                if (unprocessed.length === 0) {
+                    showToast('All videos are already processed');
+                    return;
+                }
+
+                showToast(`Queuing ${unprocessed.length} videos for processing...`);
+
+                // Process sequentially (one at a time to avoid GPU contention)
+                for (const v of unprocessed) {
+                    await processVideo(v.session_id);
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            } catch (e) {
+                showToast('Failed to queue videos', true);
+            }
+        }
+
+        let exportPollingIntervals = {};
+
+        async function exportVideo(sessionId) {
+            try {
+                const res = await fetch('/api/videos/export', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sessionId, sample_rate: 1 })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showToast(`Export started: ${sessionId}`);
+                    loadVideos();
+                    startExportPolling(sessionId);
+                } else {
+                    showToast(data.error || 'Failed to start export', true);
+                }
+            } catch (e) {
+                showToast('Network error', true);
+            }
+        }
+
+        function startExportPolling(sessionId) {
+            if (exportPollingIntervals[sessionId]) return;
+
+            exportPollingIntervals[sessionId] = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/videos/export-status/${encodeURIComponent(sessionId)}`);
+                    const status = await res.json();
+
+                    if (status.status === 'done') {
+                        clearInterval(exportPollingIntervals[sessionId]);
+                        delete exportPollingIntervals[sessionId];
+                        showToast(`Export done: ${sessionId} (${status.count} images)`);
+                        loadVideos();
+                    } else if (status.status === 'error') {
+                        clearInterval(exportPollingIntervals[sessionId]);
+                        delete exportPollingIntervals[sessionId];
+                        showToast(`Export error: ${status.error}`, true);
+                        loadVideos();
+                    }
+                } catch (e) {
+                    // Ignore transient errors
+                }
+            }, 2000);
+        }
+
+        // Check NAS status on page load (update mode badge)
+        checkNasStatus();
+
+        // Auto-load videos tab if hash is set
+        if (window.location.hash === '#videos') {
+            document.querySelector('[data-tab="videos"]').click();
+        } else if (window.location.hash === '#settings') {
+            document.querySelector('[data-tab="settings"]').click();
+        }
+    </script>
+</body>
+</html>

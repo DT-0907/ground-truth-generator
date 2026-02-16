@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review: {{ session_id }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+        .layout {
+            display: flex;
+            height: 100vh;
+        }
+        .video-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            min-width: 0;
+        }
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            background: #16213e;
+            padding: 10px 15px;
+            border-radius: 8px;
+            align-items: center;
+        }
+        .toolbar button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #2d3a5a;
+            color: #fff;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .toolbar button:hover { background: #3d4a6a; }
+        .toolbar button.active { background: #4ecca3; color: #000; }
+        .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .toolbar .separator {
+            width: 1px;
+            height: 24px;
+            background: #2d3a5a;
+            margin: 0 5px;
+        }
+        .toolbar .mode-indicator {
+            margin-left: auto;
+            padding: 6px 12px;
+            background: #2d3a5a;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .toolbar .mode-indicator.drawing { background: #e74c3c; color: #fff; }
+        .frame-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #frameImage {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        #canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #canvas.drawing { cursor: crosshair; }
+        .loading {
+            position: absolute;
+            color: #888;
+            font-size: 14px;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #16213e;
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .controls button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #2d3a5a;
+            color: #fff;
+            font-size: 14px;
+        }
+        .controls button:hover { background: #3d4a6a; }
+        .controls button.active { background: #4ecca3; color: #000; }
+        .controls input[type="number"] {
+            width: 70px;
+            padding: 6px 8px;
+            border: 1px solid #2d3a5a;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+        }
+        #frameSlider {
+            flex: 1;
+            min-width: 200px;
+            height: 8px;
+            -webkit-appearance: none;
+            background: #2d3a5a;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #frameSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #4ecca3;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        #frameInfo {
+            font-size: 13px;
+            color: #aaa;
+            min-width: 100px;
+            text-align: center;
+            font-family: monospace;
+        }
+        .sidebar {
+            width: 380px;
+            background: #16213e;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #2d3a5a;
+            flex-shrink: 0;
+        }
+        .sidebar-header {
+            padding: 15px;
+            border-bottom: 1px solid #2d3a5a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sidebar-header h2 { font-size: 16px; }
+        .sidebar-header a {
+            color: #4ecca3;
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .filters {
+            padding: 10px 15px;
+            border-bottom: 1px solid #2d3a5a;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 4px 8px;
+            border: 1px solid #2d3a5a;
+            border-radius: 4px;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .filter-btn:hover, .filter-btn.active {
+            border-color: #4ecca3;
+            color: #4ecca3;
+        }
+        .track-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .track-item {
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        .track-item:hover { background: #222244; }
+        .track-item.selected { border-color: #4ecca3; background: #1f3a3a; }
+        .track-item.active-frame { background: #2a2a4a; }
+        .track-item.needs-review { border-left: 3px solid #f39c12; }
+        .track-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .track-id { font-weight: bold; font-size: 14px; }
+        .track-class {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .class-car { background: #3498db; }
+        .class-truck { background: #e74c3c; }
+        .class-bus { background: #9b59b6; }
+        .class-motorcycle { background: #f39c12; color: #000; }
+        .class-bicycle { background: #1abc9c; }
+        .class-unknown { background: #95a5a6; }
+        .track-meta { font-size: 11px; color: #888; }
+        .actions {
+            padding: 15px;
+            border-top: 1px solid #2d3a5a;
+        }
+        .actions h3 {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .action-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .action-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-delete { background: #e74c3c; color: #fff; }
+        .btn-delete:hover:not(:disabled) { background: #c0392b; }
+        .btn-class { background: #3498db; color: #fff; }
+        .btn-class:hover:not(:disabled) { background: #2980b9; }
+        .btn-merge { background: #9b59b6; color: #fff; }
+        .btn-merge:hover:not(:disabled) { background: #8e44ad; }
+        .btn-split { background: #f39c12; color: #000; }
+        .btn-split:hover:not(:disabled) { background: #d68910; }
+        .btn-save { background: #4ecca3; color: #000; width: 100%; }
+        .btn-save:hover { background: #3db892; }
+        .shortcuts {
+            padding: 10px 15px;
+            font-size: 10px;
+            color: #555;
+            border-top: 1px solid #2d3a5a;
+            line-height: 1.6;
+        }
+        .shortcuts kbd {
+            background: #2d3a5a;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-right: 2px;
+            font-size: 10px;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4ecca3;
+            color: #000;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: 500;
+            display: none;
+            z-index: 1000;
+        }
+        .toast.error { background: #e74c3c; color: #fff; }
+        .toast.show { display: block; }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: #16213e;
+            padding: 25px;
+            border-radius: 12px;
+            min-width: 300px;
+        }
+        .modal-content h3 { margin-bottom: 15px; }
+        .modal-content select, .modal-content input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #2d3a5a;
+            border-radius: 6px;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .modal-buttons { display: flex; gap: 10px; }
+        .modal-buttons button { flex: 1; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        .modal-cancel { background: #2d3a5a; color: #fff; }
+        .modal-confirm { background: #4ecca3; color: #000; }
+        .unsaved-indicator {
+            display: none;
+            color: #f39c12;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .unsaved-indicator.show { display: inline; }
+        .roi-panel {
+            padding: 10px 15px;
+            border-top: 1px solid #2d3a5a;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .roi-panel h3 {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .roi-item {
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            background: #1a1a2e;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .roi-item .roi-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            display: inline-block;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        .roi-item .roi-name {
+            flex: 1;
+            cursor: pointer;
+        }
+        .roi-item .roi-name:hover { color: #4ecca3; }
+        .roi-item .roi-stats {
+            color: #aaa;
+            font-size: 11px;
+            margin-right: 8px;
+            white-space: nowrap;
+        }
+        .roi-item .roi-delete {
+            color: #e74c3c;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 0 4px;
+        }
+        .roi-item .roi-delete:hover { color: #ff6b6b; }
+        .roi-stats-detail {
+            padding: 4px 8px 4px 26px;
+            font-size: 11px;
+            color: #aaa;
+            background: #111;
+            border-radius: 3px;
+            margin-top: -2px;
+            margin-bottom: 4px;
+        }
+        #canvas.roi-drawing { cursor: crosshair; }
+        .review-progress {
+            font-size: 11px;
+            color: #f39c12;
+            padding: 4px 8px;
+            background: #2d3a5a;
+            border-radius: 4px;
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <div class="video-panel">
+            <div class="toolbar">
+                <button id="selectMode" class="active" title="Select mode (V)">Select</button>
+                <button id="drawMode" title="Draw box (B)">Draw Box</button>
+                <div class="separator"></div>
+                <button id="undoBtn" disabled title="Undo (Ctrl+Z)">Undo</button>
+                <button id="redoBtn" disabled title="Redo (Ctrl+Y)">Redo</button>
+                <div class="separator"></div>
+                <button id="copyBoxBtn" disabled title="Copy box to next frame (N)">Copy to Next</button>
+                <button id="copyBoxPrevBtn" disabled title="Copy box to prev frame (P)">Copy to Prev</button>
+                <div class="separator"></div>
+                <button id="nextReviewBtn" title="Next review track (R)">Next Review</button>
+                <span class="review-progress" id="reviewProgress"></span>
+                <div class="separator"></div>
+                <button id="roiRectBtn" title="Draw rectangular ROI (Shift+R)">ROI Rect</button>
+                <button id="roiPolyBtn" title="Draw polygon ROI (Shift+P)">ROI Poly</button>
+                <div class="mode-indicator" id="modeIndicator">Select Mode</div>
+            </div>
+
+            <div class="frame-container" id="frameContainer">
+                <div class="loading" id="loadingText">Loading frame...</div>
+                <img id="frameImage" style="display:none;">
+                <canvas id="canvas"></canvas>
+            </div>
+
+            <div class="controls">
+                <button id="playBtn">Play</button>
+                <button id="prevFrame" title="Previous frame">&lt;</button>
+                <button id="prev10" title="-10 frames">-10</button>
+                <input type="number" id="frameInput" min="0" max="{{ data.total_frames - 1 }}" value="0" title="Jump to frame">
+                <button id="next10" title="+10 frames">+10</button>
+                <button id="nextFrame" title="Next frame">&gt;</button>
+                <input type="range" id="frameSlider" min="0" max="{{ data.total_frames - 1 }}" value="0">
+                <span id="frameInfo">0 / {{ data.total_frames }}</span>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Tracks (<span id="trackCount">{{ data.tracks|length }}</span>)
+                    <span class="unsaved-indicator" id="unsavedIndicator">*unsaved</span>
+                </h2>
+                <a href="/">Back</a>
+            </div>
+
+            <div class="filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="visible">Visible</button>
+                <button class="filter-btn" data-filter="review">Review</button>
+                <button class="filter-btn" data-filter="car">Car</button>
+                <button class="filter-btn" data-filter="truck">Truck</button>
+                <button class="filter-btn" data-filter="bus">Bus</button>
+            </div>
+
+            <div class="track-list" id="trackList"></div>
+
+            <div class="roi-panel" id="roiPanel">
+                <h3>
+                    Regions of Interest
+                    <span style="font-size:10px; color:#555; font-weight:normal" id="roiCount"></span>
+                </h3>
+                <div id="roiList"></div>
+            </div>
+
+            <div class="actions">
+                <h3>Track Actions</h3>
+                <div class="action-row">
+                    <button class="action-btn btn-delete" id="deleteBtn" disabled>Delete (D)</button>
+                    <button class="action-btn btn-class" id="classBtn" disabled>Class (C)</button>
+                </div>
+                <div class="action-row">
+                    <button class="action-btn btn-merge" id="mergeBtn" disabled>Merge (M)</button>
+                    <button class="action-btn btn-split" id="splitBtn" disabled>Split (S)</button>
+                </div>
+                <button class="action-btn btn-save" id="saveBtn">Save Corrections (Ctrl+S)</button>
+            </div>
+
+            <div class="shortcuts">
+                <kbd>Space</kbd> Play <kbd>←→</kbd> Frame <kbd>V</kbd> Select <kbd>B</kbd> Draw<br>
+                <kbd>D</kbd> Delete <kbd>C</kbd> Class <kbd>M</kbd> Merge <kbd>S</kbd> Split<br>
+                <kbd>N</kbd> Copy→Next <kbd>P</kbd> Copy→Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save<br>
+                <kbd>Shift+R</kbd> ROI Rect <kbd>Shift+P</kbd> ROI Poly
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- Class Change Modal -->
+    <div class="modal" id="classModal">
+        <div class="modal-content">
+            <h3>Change Class</h3>
+            <select id="classSelect">
+                <option value="car">Car</option>
+                <option value="truck">Truck</option>
+                <option value="bus">Bus</option>
+                <option value="motorcycle">Motorcycle</option>
+                <option value="bicycle">Bicycle</option>
+            </select>
+            <div class="modal-buttons">
+                <button class="modal-cancel" onclick="closeModal('classModal')">Cancel</button>
+                <button class="modal-confirm" onclick="confirmClassChange()">Change</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Modal -->
+    <div class="modal" id="mergeModal">
+        <div class="modal-content">
+            <h3>Merge Into Track</h3>
+            <select id="mergeSelect"></select>
+            <div id="mergeGapInfo" style="font-size:12px; color:#aaa; margin:8px 0;"></div>
+            <div class="modal-buttons">
+                <button class="modal-cancel" onclick="closeModal('mergeModal')">Cancel</button>
+                <button class="modal-confirm" onclick="confirmMerge()">Merge</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Track Modal -->
+    <div class="modal" id="newTrackModal">
+        <div class="modal-content">
+            <h3>Create New Track</h3>
+            <select id="newTrackClass">
+                <option value="car">Car</option>
+                <option value="truck">Truck</option>
+                <option value="bus">Bus</option>
+                <option value="motorcycle">Motorcycle</option>
+                <option value="bicycle">Bicycle</option>
+            </select>
+            <div class="modal-buttons">
+                <button class="modal-cancel" onclick="cancelNewTrack()">Cancel</button>
+                <button class="modal-confirm" onclick="confirmNewTrack()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ROI Name Modal -->
+    <div class="modal" id="roiNameModal">
+        <div class="modal-content">
+            <h3>Name this ROI</h3>
+            <input type="text" id="roiNameInput" placeholder="e.g., Intersection Entry" style="width:100%;padding:8px;border-radius:4px;border:1px solid #2d3a5a;background:#1a1a2e;color:#fff;margin-bottom:10px;">
+            <div class="modal-buttons">
+                <button class="modal-cancel" onclick="cancelRoi()">Cancel</button>
+                <button class="modal-confirm" onclick="confirmRoi()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sessionId = "{{ session_id }}";
+        const fps = {{ data.fps }};
+        const totalFrames = {{ data.total_frames }};
+        const videoWidth = {{ data.resolution[0] }};
+        const videoHeight = {{ data.resolution[1] }};
+
+        let tracks = {{ data.tracks | tojson }};
+        let selectedTrackId = null;
+        let currentFrame = 0;
+        let isPlaying = false;
+        let playInterval = null;
+        let currentFilter = 'all';
+        let hasUnsavedChanges = false;
+
+        // Drawing state
+        let isDrawMode = false;
+        let isDrawing = false;
+        let drawStart = null;
+        let drawEnd = null;
+        let pendingBox = null;
+
+        // ROI state
+        let rois = {{ data.rois | tojson }};
+        let isRoiDrawMode = false;
+        let roiDrawType = 'rect';
+        let roiDrawing = false;
+        let roiDrawStart = null;
+        let roiDrawEnd = null;
+        let roiPolygonPoints = [];
+        let nextRoiId = rois.length > 0 ? Math.max(...rois.map(r => r.id)) + 1 : 1;
+        let pendingRoiPoints = null;
+        let pendingRoiType = null;
+        const ROI_COLORS = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd'];
+
+        // Undo/Redo
+        let undoStack = [];
+        let redoStack = [];
+        const MAX_UNDO = 50;
+
+        // DOM elements
+        const frameImage = document.getElementById('frameImage');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const slider = document.getElementById('frameSlider');
+        const frameInfo = document.getElementById('frameInfo');
+        const frameInput = document.getElementById('frameInput');
+        const trackList = document.getElementById('trackList');
+        const loadingText = document.getElementById('loadingText');
+        const modeIndicator = document.getElementById('modeIndicator');
+
+        // Colors
+        const classColors = {
+            car: '#3498db',
+            truck: '#e74c3c',
+            bus: '#9b59b6',
+            motorcycle: '#f39c12',
+            bicycle: '#1abc9c',
+            unknown: '#95a5a6'
+        };
+
+        // ===== UNDO/REDO =====
+        function saveState() {
+            undoStack.push(JSON.stringify({ tracks, rois }));
+            if (undoStack.length > MAX_UNDO) undoStack.shift();
+            redoStack = [];
+            updateUndoRedoButtons();
+            markUnsaved();
+        }
+
+        function undo() {
+            if (undoStack.length === 0) return;
+            redoStack.push(JSON.stringify({ tracks, rois }));
+            const state = JSON.parse(undoStack.pop());
+            tracks = state.tracks;
+            rois = state.rois || [];
+            updateUndoRedoButtons();
+            renderTracks(currentFilter);
+            renderRois();
+            drawBoxes();
+            showToast('Undone');
+        }
+
+        function redo() {
+            if (redoStack.length === 0) return;
+            undoStack.push(JSON.stringify({ tracks, rois }));
+            const state = JSON.parse(redoStack.pop());
+            tracks = state.tracks;
+            rois = state.rois || [];
+            updateUndoRedoButtons();
+            renderTracks(currentFilter);
+            renderRois();
+            drawBoxes();
+            showToast('Redone');
+        }
+
+        function updateUndoRedoButtons() {
+            document.getElementById('undoBtn').disabled = undoStack.length === 0;
+            document.getElementById('redoBtn').disabled = redoStack.length === 0;
+        }
+
+        function markUnsaved() {
+            hasUnsavedChanges = true;
+            document.getElementById('unsavedIndicator').classList.add('show');
+        }
+
+        function markSaved() {
+            hasUnsavedChanges = false;
+            document.getElementById('unsavedIndicator').classList.remove('show');
+        }
+
+        // ===== FRAME LOADING =====
+        let loadingFrameNum = -1;
+
+        function loadFrame(frameNum) {
+            frameNum = Math.max(0, Math.min(frameNum, totalFrames - 1));
+            if (frameNum === currentFrame && frameImage.style.display !== 'none') {
+                return; // Already loaded
+            }
+
+            currentFrame = frameNum;
+            loadingFrameNum = frameNum;
+
+            loadingText.style.display = 'block';
+            loadingText.textContent = 'Loading frame...';
+
+            const img = new Image();
+            img.onload = function() {
+                if (loadingFrameNum !== frameNum) return; // Stale request
+
+                loadingText.style.display = 'none';
+                frameImage.style.display = 'block';
+                frameImage.src = img.src;
+
+                requestAnimationFrame(() => {
+                    const rect = frameImage.getBoundingClientRect();
+                    canvas.width = rect.width;
+                    canvas.height = rect.height;
+                    canvas.style.width = rect.width + 'px';
+                    canvas.style.height = rect.height + 'px';
+                    drawBoxes();
+                });
+            };
+            img.onerror = function() {
+                if (loadingFrameNum !== frameNum) return;
+                loadingText.textContent = 'Error loading frame';
+            };
+            img.src = `/frame/${sessionId}/${frameNum}`;
+
+            slider.value = frameNum;
+            frameInput.value = frameNum;
+            frameInfo.textContent = `${frameNum} / ${totalFrames}`;
+            renderTracks(currentFilter);
+        }
+
+        // ===== DRAWING =====
+        function setDrawMode(enabled) {
+            isDrawMode = enabled;
+            canvas.style.pointerEvents = enabled ? 'auto' : 'none';
+            canvas.classList.toggle('drawing', enabled);
+            document.getElementById('selectMode').classList.toggle('active', !enabled);
+            document.getElementById('drawMode').classList.toggle('active', enabled);
+            modeIndicator.textContent = enabled ? 'DRAW MODE - Click and drag' : 'Select Mode';
+            modeIndicator.classList.toggle('drawing', enabled);
+
+            if (!enabled) {
+                isDrawing = false;
+                drawStart = null;
+                drawEnd = null;
+                drawBoxes();
+            }
+        }
+
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        function canvasToVideo(canvasX, canvasY) {
+            const rect = frameImage.getBoundingClientRect();
+            return {
+                x: (canvasX / rect.width) * videoWidth,
+                y: (canvasY / rect.height) * videoHeight
+            };
+        }
+
+        canvas.addEventListener('mousedown', e => {
+            // ROI drawing
+            if (isRoiDrawMode) {
+                const coords = getCanvasCoords(e);
+                if (roiDrawType === 'rect') {
+                    roiDrawing = true;
+                    roiDrawStart = coords;
+                    roiDrawEnd = coords;
+                } else if (roiDrawType === 'polygon') {
+                    roiPolygonPoints.push(coords);
+                    drawBoxes();
+                }
+                return;
+            }
+            if (!isDrawMode) return;
+            isDrawing = true;
+            drawStart = getCanvasCoords(e);
+            drawEnd = drawStart;
+        });
+
+        canvas.addEventListener('mousemove', e => {
+            // ROI drawing
+            if (isRoiDrawMode && roiDrawType === 'rect' && roiDrawing) {
+                roiDrawEnd = getCanvasCoords(e);
+                drawBoxes();
+                return;
+            }
+            if (isRoiDrawMode) return;
+            if (!isDrawMode || !isDrawing) return;
+            drawEnd = getCanvasCoords(e);
+            drawBoxes();
+        });
+
+        canvas.addEventListener('mouseup', e => {
+            // ROI rect drawing
+            if (isRoiDrawMode && roiDrawType === 'rect' && roiDrawing) {
+                roiDrawing = false;
+                roiDrawEnd = getCanvasCoords(e);
+                const width = Math.abs(roiDrawEnd.x - roiDrawStart.x);
+                const height = Math.abs(roiDrawEnd.y - roiDrawStart.y);
+                if (width > 10 && height > 10) {
+                    const p1 = canvasToVideo(
+                        Math.min(roiDrawStart.x, roiDrawEnd.x),
+                        Math.min(roiDrawStart.y, roiDrawEnd.y)
+                    );
+                    const p2 = canvasToVideo(
+                        Math.max(roiDrawStart.x, roiDrawEnd.x),
+                        Math.max(roiDrawStart.y, roiDrawEnd.y)
+                    );
+                    pendingRoiPoints = [{x: p1.x, y: p1.y}, {x: p2.x, y: p2.y}];
+                    pendingRoiType = 'rect';
+                    document.getElementById('roiNameInput').value = `ROI ${nextRoiId}`;
+                    showModal('roiNameModal');
+                }
+                roiDrawStart = null;
+                roiDrawEnd = null;
+                drawBoxes();
+                return;
+            }
+            if (!isDrawMode || !isDrawing) return;
+            isDrawing = false;
+            drawEnd = getCanvasCoords(e);
+
+            // Check if box is big enough
+            const width = Math.abs(drawEnd.x - drawStart.x);
+            const height = Math.abs(drawEnd.y - drawStart.y);
+
+            if (width > 10 && height > 10) {
+                // Convert to video coordinates
+                const p1 = canvasToVideo(Math.min(drawStart.x, drawEnd.x), Math.min(drawStart.y, drawEnd.y));
+                const p2 = canvasToVideo(Math.max(drawStart.x, drawEnd.x), Math.max(drawStart.y, drawEnd.y));
+
+                pendingBox = [p1.x, p1.y, p2.x, p2.y];
+                showModal('newTrackModal');
+            }
+
+            drawStart = null;
+            drawEnd = null;
+            drawBoxes();
+        });
+
+        // ROI polygon double-click to finish
+        canvas.addEventListener('dblclick', e => {
+            if (isRoiDrawMode && roiDrawType === 'polygon' && roiPolygonPoints.length >= 3) {
+                // Remove duplicate last point if dblclick's mousedown added one
+                if (roiPolygonPoints.length >= 2) {
+                    const last = roiPolygonPoints[roiPolygonPoints.length - 1];
+                    const prev = roiPolygonPoints[roiPolygonPoints.length - 2];
+                    if (Math.abs(last.x - prev.x) < 3 && Math.abs(last.y - prev.y) < 3) {
+                        roiPolygonPoints.pop();
+                    }
+                }
+                const videoPoints = roiPolygonPoints.map(p => {
+                    const v = canvasToVideo(p.x, p.y);
+                    return {x: v.x, y: v.y};
+                });
+                pendingRoiPoints = videoPoints;
+                pendingRoiType = 'polygon';
+                document.getElementById('roiNameInput').value = `ROI ${nextRoiId}`;
+                showModal('roiNameModal');
+                roiPolygonPoints = [];
+                drawBoxes();
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            if (isDrawing) {
+                isDrawing = false;
+                drawStart = null;
+                drawEnd = null;
+                drawBoxes();
+            }
+            if (roiDrawing) {
+                roiDrawing = false;
+                roiDrawStart = null;
+                roiDrawEnd = null;
+                drawBoxes();
+            }
+        });
+
+        function cancelNewTrack() {
+            pendingBox = null;
+            closeModal('newTrackModal');
+            drawBoxes();
+        }
+
+        function confirmNewTrack() {
+            if (!pendingBox) return;
+
+            saveState();
+
+            const newClass = document.getElementById('newTrackClass').value;
+            const newId = tracks.length > 0 ? Math.max(...tracks.map(t => t.track_id)) + 1 : 1;
+
+            const newTrack = {
+                track_id: newId,
+                class: newClass,
+                class_id: {car: 2, truck: 7, bus: 5, motorcycle: 3, bicycle: 1}[newClass] || 0,
+                frames: [{
+                    frame: currentFrame,
+                    bbox: pendingBox.map(v => Math.round(v)),
+                    conf: 1.0
+                }],
+                start_frame: currentFrame,
+                end_frame: currentFrame,
+                needs_review: false,
+                avg_confidence: 1.0
+            };
+
+            tracks.push(newTrack);
+            pendingBox = null;
+            closeModal('newTrackModal');
+
+            selectedTrackId = newId;
+            renderTracks(currentFilter);
+            drawBoxes();
+            updateActionButtons();
+            showToast(`Track #${newId} created`);
+        }
+
+        // ===== COPY BOX =====
+        function copyBoxToFrame(direction) {
+            if (!selectedTrackId) return;
+
+            const track = tracks.find(t => t.track_id === selectedTrackId);
+            if (!track) return;
+
+            const currentFrameData = track.frames.find(f => f.frame === currentFrame);
+            if (!currentFrameData) {
+                showToast('No box at current frame', true);
+                return;
+            }
+
+            const targetFrame = currentFrame + direction;
+            if (targetFrame < 0 || targetFrame >= totalFrames) {
+                showToast('Cannot copy outside video', true);
+                return;
+            }
+
+            saveState();
+
+            // Check if target frame already has a box
+            const existingIdx = track.frames.findIndex(f => f.frame === targetFrame);
+            const newFrameData = {
+                frame: targetFrame,
+                bbox: [...currentFrameData.bbox],
+                conf: currentFrameData.conf
+            };
+
+            if (existingIdx >= 0) {
+                track.frames[existingIdx] = newFrameData;
+            } else {
+                track.frames.push(newFrameData);
+                track.frames.sort((a, b) => a.frame - b.frame);
+            }
+
+            // Update bounds
+            track.start_frame = Math.min(...track.frames.map(f => f.frame));
+            track.end_frame = Math.max(...track.frames.map(f => f.frame));
+
+            loadFrame(targetFrame);
+            showToast(`Box copied to frame ${targetFrame}`);
+        }
+
+        // ===== NEXT REVIEW =====
+        function goToNextReview() {
+            const reviewTracks = tracks.filter(t => t.needs_review).sort((a, b) => a.track_id - b.track_id);
+            if (reviewTracks.length === 0) {
+                showToast('No tracks need review', true);
+                return;
+            }
+            let currentIdx = reviewTracks.findIndex(t => t.track_id === selectedTrackId);
+            let nextIdx = (currentIdx + 1) % reviewTracks.length;
+            const nextTrack = reviewTracks[nextIdx];
+            selectTrack(nextTrack.track_id);
+            loadFrame(nextTrack.start_frame);
+            updateReviewProgress();
+            showToast(`Review ${nextIdx + 1} of ${reviewTracks.length}: Track #${nextTrack.track_id}`);
+        }
+
+        function updateReviewProgress() {
+            const count = tracks.filter(t => t.needs_review).length;
+            const el = document.getElementById('reviewProgress');
+            el.textContent = count > 0 ? `${count} need review` : '';
+        }
+
+        // ===== INTERPOLATION =====
+        function interpolateFrames(earlyFrames, lateFrames) {
+            if (earlyFrames.length === 0 || lateFrames.length === 0) return [];
+            const lastEarly = earlyFrames[earlyFrames.length - 1];
+            const firstLate = lateFrames[0];
+            if (firstLate.frame <= lastEarly.frame + 1) return [];
+
+            const gapStart = lastEarly.frame + 1;
+            const gapEnd = firstLate.frame - 1;
+            const totalGap = gapEnd - gapStart + 1;
+            if (totalGap <= 0) return [];
+
+            const interpolated = [];
+            for (let i = 0; i < totalGap; i++) {
+                const t = (i + 1) / (totalGap + 1);
+                interpolated.push({
+                    frame: gapStart + i,
+                    bbox: [
+                        Math.round((lastEarly.bbox[0] + (firstLate.bbox[0] - lastEarly.bbox[0]) * t) * 10) / 10,
+                        Math.round((lastEarly.bbox[1] + (firstLate.bbox[1] - lastEarly.bbox[1]) * t) * 10) / 10,
+                        Math.round((lastEarly.bbox[2] + (firstLate.bbox[2] - lastEarly.bbox[2]) * t) * 10) / 10,
+                        Math.round((lastEarly.bbox[3] + (firstLate.bbox[3] - lastEarly.bbox[3]) * t) * 10) / 10
+                    ],
+                    conf: 0,
+                    interpolated: true
+                });
+            }
+            return interpolated;
+        }
+
+        // ===== ROI SYSTEM =====
+        function videoToCanvas(vx, vy) {
+            const rect = frameImage.getBoundingClientRect();
+            return {
+                x: (vx / videoWidth) * rect.width,
+                y: (vy / videoHeight) * rect.height
+            };
+        }
+
+        function setRoiDrawMode(type) {
+            if (type === false) {
+                isRoiDrawMode = false;
+                roiDrawing = false;
+                roiDrawStart = null;
+                roiDrawEnd = null;
+                roiPolygonPoints = [];
+                canvas.classList.remove('roi-drawing');
+                document.getElementById('roiRectBtn').classList.remove('active');
+                document.getElementById('roiPolyBtn').classList.remove('active');
+                canvas.style.pointerEvents = isDrawMode ? 'auto' : 'none';
+                modeIndicator.textContent = isDrawMode ? 'DRAW MODE - Click and drag' : 'Select Mode';
+                modeIndicator.classList.toggle('drawing', isDrawMode);
+                drawBoxes();
+                return;
+            }
+            if (isDrawMode) setDrawMode(false);
+            isRoiDrawMode = true;
+            roiDrawType = type;
+            roiDrawing = false;
+            roiPolygonPoints = [];
+            canvas.style.pointerEvents = 'auto';
+            canvas.classList.add('roi-drawing');
+            document.getElementById('roiRectBtn').classList.toggle('active', type === 'rect');
+            document.getElementById('roiPolyBtn').classList.toggle('active', type === 'polygon');
+            modeIndicator.textContent = type === 'rect'
+                ? 'ROI RECT MODE - Click and drag'
+                : 'ROI POLY MODE - Click points, double-click to finish';
+            modeIndicator.classList.add('drawing');
+        }
+
+        function confirmRoi() {
+            if (!pendingRoiPoints) return;
+            const name = document.getElementById('roiNameInput').value.trim() || `ROI ${nextRoiId}`;
+            const color = ROI_COLORS[(nextRoiId - 1) % ROI_COLORS.length];
+            saveState();
+            rois.push({
+                id: nextRoiId,
+                name: name,
+                type: pendingRoiType,
+                points: pendingRoiPoints,
+                color: color
+            });
+            nextRoiId++;
+            pendingRoiPoints = null;
+            pendingRoiType = null;
+            closeModal('roiNameModal');
+            setRoiDrawMode(false);
+            renderRois();
+            drawBoxes();
+        }
+
+        function cancelRoi() {
+            pendingRoiPoints = null;
+            pendingRoiType = null;
+            roiPolygonPoints = [];
+            closeModal('roiNameModal');
+            drawBoxes();
+        }
+
+        function deleteRoi(roiId) {
+            saveState();
+            rois = rois.filter(r => r.id !== roiId);
+            renderRois();
+            drawBoxes();
+        }
+
+        function renameRoi(roiId) {
+            const roi = rois.find(r => r.id === roiId);
+            if (!roi) return;
+            const newName = prompt('Rename ROI:', roi.name);
+            if (newName !== null && newName.trim()) {
+                saveState();
+                roi.name = newName.trim();
+                renderRois();
+            }
+        }
+
+        function pointInRect(px, py, p1, p2) {
+            return px >= p1.x && px <= p2.x && py >= p1.y && py <= p2.y;
+        }
+
+        function pointInPolygon(px, py, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x, yi = polygon[i].y;
+                const xj = polygon[j].x, yj = polygon[j].y;
+                const intersect = ((yi > py) !== (yj > py))
+                    && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        function computeRoiStats(roi) {
+            const stats = { total: 0, byClass: {} };
+            for (const track of tracks) {
+                let passes = false;
+                for (const f of track.frames) {
+                    const cx = (f.bbox[0] + f.bbox[2]) / 2;
+                    const cy = (f.bbox[1] + f.bbox[3]) / 2;
+                    if (roi.type === 'rect') {
+                        if (pointInRect(cx, cy, roi.points[0], roi.points[1])) { passes = true; break; }
+                    } else if (roi.type === 'polygon') {
+                        if (pointInPolygon(cx, cy, roi.points)) { passes = true; break; }
+                    }
+                }
+                if (passes) {
+                    stats.total++;
+                    const cls = track.class;
+                    stats.byClass[cls] = (stats.byClass[cls] || 0) + 1;
+                }
+            }
+            return stats;
+        }
+
+        function renderRois() {
+            const list = document.getElementById('roiList');
+            const countEl = document.getElementById('roiCount');
+            list.innerHTML = '';
+            if (rois.length === 0) {
+                list.innerHTML = '<div style="font-size:11px;color:#555;">No ROIs. Use ROI Rect/Poly buttons to draw.</div>';
+                countEl.textContent = '';
+                return;
+            }
+            countEl.textContent = `(${rois.length})`;
+            for (const roi of rois) {
+                const stats = computeRoiStats(roi);
+                const classBreakdown = Object.entries(stats.byClass)
+                    .map(([cls, count]) => `${cls}: ${count}`)
+                    .join(', ');
+                const item = document.createElement('div');
+                item.className = 'roi-item';
+                item.innerHTML = `
+                    <span class="roi-color" style="background:${roi.color}"></span>
+                    <span class="roi-name" onclick="renameRoi(${roi.id})" title="Click to rename">${roi.name}</span>
+                    <span class="roi-stats">${stats.total} vehicles</span>
+                    <span class="roi-delete" onclick="deleteRoi(${roi.id})" title="Delete ROI">&times;</span>
+                `;
+                list.appendChild(item);
+                if (classBreakdown) {
+                    const detail = document.createElement('div');
+                    detail.className = 'roi-stats-detail';
+                    detail.textContent = classBreakdown;
+                    list.appendChild(detail);
+                }
+            }
+        }
+
+        // ===== DRAW BOXES =====
+        function drawBoxes() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const rect = frameImage.getBoundingClientRect();
+            if (rect.width === 0) return;
+
+            const scaleX = rect.width / videoWidth;
+            const scaleY = rect.height / videoHeight;
+
+            // Draw existing tracks
+            for (const track of tracks) {
+                const frameData = track.frames.find(f => f.frame === currentFrame);
+                if (!frameData) continue;
+
+                const [x1, y1, x2, y2] = frameData.bbox;
+                const sx1 = x1 * scaleX;
+                const sy1 = y1 * scaleY;
+                const sw = (x2 - x1) * scaleX;
+                const sh = (y2 - y1) * scaleY;
+
+                const color = classColors[track.class] || classColors.unknown;
+                const isSelected = track.track_id === selectedTrackId;
+
+                // Box - dashed for interpolated frames
+                const isInterpolated = frameData.interpolated === true;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = isSelected ? 4 : 2;
+                if (isInterpolated) ctx.setLineDash([6, 4]);
+                ctx.strokeRect(sx1, sy1, sw, sh);
+                if (isInterpolated) ctx.setLineDash([]);
+
+                // Semi-transparent fill for selected
+                if (isSelected) {
+                    ctx.fillStyle = color + '33';
+                    ctx.fillRect(sx1, sy1, sw, sh);
+                }
+
+                // Label
+                const labelSuffix = isInterpolated ? ' [interp]' : '';
+                const label = `#${track.track_id} ${track.class}${labelSuffix}`;
+                ctx.font = 'bold 12px sans-serif';
+                const textWidth = ctx.measureText(label).width;
+
+                ctx.fillStyle = isInterpolated ? (color + 'AA') : color;
+                ctx.fillRect(sx1, sy1 - 18, textWidth + 8, 18);
+
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, sx1 + 4, sy1 - 5);
+            }
+
+            // Draw ROIs
+            for (const roi of rois) {
+                ctx.strokeStyle = roi.color;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                if (roi.type === 'rect') {
+                    const p1 = videoToCanvas(roi.points[0].x, roi.points[0].y);
+                    const p2 = videoToCanvas(roi.points[1].x, roi.points[1].y);
+                    ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+                    // Fill with semi-transparent color
+                    ctx.fillStyle = roi.color + '15';
+                    ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+                    // Label
+                    ctx.font = 'bold 11px sans-serif';
+                    const lw = ctx.measureText(roi.name).width;
+                    ctx.fillStyle = roi.color + 'CC';
+                    ctx.fillRect(p1.x, p1.y - 16, lw + 8, 16);
+                    ctx.fillStyle = '#000';
+                    ctx.fillText(roi.name, p1.x + 4, p1.y - 4);
+                } else if (roi.type === 'polygon' && roi.points.length >= 3) {
+                    const first = videoToCanvas(roi.points[0].x, roi.points[0].y);
+                    ctx.beginPath();
+                    ctx.moveTo(first.x, first.y);
+                    for (let i = 1; i < roi.points.length; i++) {
+                        const p = videoToCanvas(roi.points[i].x, roi.points[i].y);
+                        ctx.lineTo(p.x, p.y);
+                    }
+                    ctx.closePath();
+                    ctx.stroke();
+                    // Fill
+                    ctx.fillStyle = roi.color + '15';
+                    ctx.fill();
+                    // Label
+                    ctx.font = 'bold 11px sans-serif';
+                    const lw = ctx.measureText(roi.name).width;
+                    ctx.fillStyle = roi.color + 'CC';
+                    ctx.fillRect(first.x, first.y - 16, lw + 8, 16);
+                    ctx.fillStyle = '#000';
+                    ctx.fillText(roi.name, first.x + 4, first.y - 4);
+                }
+                ctx.setLineDash([]);
+            }
+
+            // Draw in-progress ROI
+            if (isRoiDrawMode) {
+                if (roiDrawType === 'rect' && roiDrawing && roiDrawStart && roiDrawEnd) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeRect(
+                        Math.min(roiDrawStart.x, roiDrawEnd.x),
+                        Math.min(roiDrawStart.y, roiDrawEnd.y),
+                        Math.abs(roiDrawEnd.x - roiDrawStart.x),
+                        Math.abs(roiDrawEnd.y - roiDrawStart.y)
+                    );
+                    ctx.setLineDash([]);
+                } else if (roiDrawType === 'polygon' && roiPolygonPoints.length > 0) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.moveTo(roiPolygonPoints[0].x, roiPolygonPoints[0].y);
+                    for (let i = 1; i < roiPolygonPoints.length; i++) {
+                        ctx.lineTo(roiPolygonPoints[i].x, roiPolygonPoints[i].y);
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    for (const p of roiPolygonPoints) {
+                        ctx.fillStyle = '#fff';
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // Draw pending box while drawing
+            if (isDrawing && drawStart && drawEnd) {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(
+                    Math.min(drawStart.x, drawEnd.x),
+                    Math.min(drawStart.y, drawEnd.y),
+                    Math.abs(drawEnd.x - drawStart.x),
+                    Math.abs(drawEnd.y - drawStart.y)
+                );
+                ctx.setLineDash([]);
+            }
+        }
+
+        // ===== TRACK LIST =====
+        function renderTracks(filter = 'all') {
+            currentFilter = filter;
+            trackList.innerHTML = '';
+
+            let filtered = [...tracks];
+            if (filter === 'review') {
+                filtered = filtered.filter(t => t.needs_review);
+            } else if (filter === 'visible') {
+                filtered = filtered.filter(t =>
+                    currentFrame >= t.start_frame && currentFrame <= t.end_frame
+                );
+            } else if (filter !== 'all') {
+                filtered = filtered.filter(t => t.class === filter);
+            }
+
+            // Sort: visible first, then by ID
+            filtered.sort((a, b) => {
+                const aVis = currentFrame >= a.start_frame && currentFrame <= a.end_frame;
+                const bVis = currentFrame >= b.start_frame && currentFrame <= b.end_frame;
+                if (aVis !== bVis) return bVis - aVis;
+                return a.track_id - b.track_id;
+            });
+
+            for (const track of filtered) {
+                const isVisible = currentFrame >= track.start_frame && currentFrame <= track.end_frame;
+
+                const div = document.createElement('div');
+                div.className = 'track-item';
+                div.dataset.trackId = track.track_id;
+                if (track.needs_review) div.classList.add('needs-review');
+                if (track.track_id === selectedTrackId) div.classList.add('selected');
+                if (isVisible) div.classList.add('active-frame');
+
+                const conf = track.avg_confidence ? Math.round(track.avg_confidence * 100) : '?';
+                div.innerHTML = `
+                    <div class="track-header">
+                        <span class="track-id">#${track.track_id}</span>
+                        <span class="track-class class-${track.class}">${track.class}</span>
+                    </div>
+                    <div class="track-meta">
+                        F${track.start_frame}-${track.end_frame} (${track.frames.length} boxes${track.frames.some(f => f.interpolated) ? ', ' + track.frames.filter(f => f.interpolated).length + ' interp' : ''}) | ${conf}% conf
+                        ${isVisible ? ' | <b>visible</b>' : ''}
+                    </div>
+                `;
+
+                div.onclick = () => {
+                    selectTrack(track.track_id);
+                    // Jump to first frame of track if not currently visible
+                    if (currentFrame < track.start_frame || currentFrame > track.end_frame) {
+                        loadFrame(track.start_frame);
+                    }
+                };
+                div.ondblclick = () => {
+                    // Double-click always jumps to start
+                    selectTrack(track.track_id);
+                    loadFrame(track.start_frame);
+                };
+
+                trackList.appendChild(div);
+            }
+
+            document.getElementById('trackCount').textContent = filtered.length;
+        }
+
+        function selectTrack(trackId) {
+            selectedTrackId = trackId;
+
+            document.querySelectorAll('.track-item').forEach(el => {
+                el.classList.toggle('selected', parseInt(el.dataset.trackId) === trackId);
+            });
+
+            updateActionButtons();
+            drawBoxes();
+        }
+
+        function updateActionButtons() {
+            const hasSelection = selectedTrackId !== null;
+            document.getElementById('deleteBtn').disabled = !hasSelection;
+            document.getElementById('classBtn').disabled = !hasSelection;
+            document.getElementById('mergeBtn').disabled = !hasSelection;
+            document.getElementById('splitBtn').disabled = !hasSelection;
+            document.getElementById('copyBoxBtn').disabled = !hasSelection;
+            document.getElementById('copyBoxPrevBtn').disabled = !hasSelection;
+        }
+
+        // ===== ACTIONS =====
+        async function deleteTrack() {
+            if (!selectedTrackId) return;
+
+            saveState();
+            tracks = tracks.filter(t => t.track_id !== selectedTrackId);
+            const deletedId = selectedTrackId;
+            selectedTrackId = null;
+            updateActionButtons();
+            renderTracks(currentFilter);
+            drawBoxes();
+            showToast(`Track #${deletedId} deleted`);
+        }
+
+        async function confirmClassChange() {
+            if (!selectedTrackId) return;
+
+            saveState();
+            const newClass = document.getElementById('classSelect').value;
+            const track = tracks.find(t => t.track_id === selectedTrackId);
+            if (track) {
+                track.class = newClass;
+                track.class_id = {car: 2, truck: 7, bus: 5, motorcycle: 3, bicycle: 1}[newClass] || 0;
+            }
+
+            closeModal('classModal');
+            renderTracks(currentFilter);
+            drawBoxes();
+            showToast('Class changed');
+        }
+
+        function showMergeModal() {
+            if (!selectedTrackId) return;
+
+            const select = document.getElementById('mergeSelect');
+            select.innerHTML = '';
+
+            const sortedTracks = [...tracks]
+                .filter(t => t.track_id !== selectedTrackId)
+                .sort((a, b) => a.track_id - b.track_id);
+
+            for (const track of sortedTracks) {
+                const opt = document.createElement('option');
+                opt.value = track.track_id;
+                opt.textContent = `#${track.track_id} ${track.class} (F${track.start_frame}-${track.end_frame})`;
+                select.appendChild(opt);
+            }
+
+            if (sortedTracks.length === 0) {
+                showToast('No other tracks to merge with', true);
+                return;
+            }
+
+            // Gap preview on selection change
+            const gapInfo = document.getElementById('mergeGapInfo');
+            select.onchange = function() {
+                const targetId = parseInt(this.value);
+                const sourceTrack = tracks.find(t => t.track_id === selectedTrackId);
+                const targetTrack = tracks.find(t => t.track_id === targetId);
+                if (sourceTrack && targetTrack) {
+                    const gap = Math.max(0,
+                        Math.max(targetTrack.start_frame - sourceTrack.end_frame,
+                                 sourceTrack.start_frame - targetTrack.end_frame) - 1);
+                    if (gap > 0) {
+                        gapInfo.textContent = `Gap: ${gap} frames will be interpolated`;
+                        gapInfo.style.color = '#f39c12';
+                    } else {
+                        gapInfo.textContent = 'No gap - tracks overlap or are adjacent';
+                        gapInfo.style.color = '#4ecca3';
+                    }
+                } else {
+                    gapInfo.textContent = '';
+                }
+            };
+            if (sortedTracks.length > 0) select.onchange();
+
+            showModal('mergeModal');
+        }
+
+        async function confirmMerge() {
+            const targetId = parseInt(document.getElementById('mergeSelect').value);
+            if (!selectedTrackId || !targetId) return;
+
+            saveState();
+
+            const sourceTrack = tracks.find(t => t.track_id === selectedTrackId);
+            const targetTrack = tracks.find(t => t.track_id === targetId);
+
+            if (sourceTrack && targetTrack) {
+                // Determine chronological order for interpolation
+                const allSource = [...sourceTrack.frames].sort((a, b) => a.frame - b.frame);
+                const allTarget = [...targetTrack.frames].sort((a, b) => a.frame - b.frame);
+
+                let earlyFrames, lateFrames;
+                if (allSource[0].frame <= allTarget[0].frame) {
+                    earlyFrames = allSource;
+                    lateFrames = allTarget;
+                } else {
+                    earlyFrames = allTarget;
+                    lateFrames = allSource;
+                }
+
+                // Generate interpolated frames for the gap
+                const interpolatedFrames = interpolateFrames(earlyFrames, lateFrames);
+
+                // Merge all frames, avoiding duplicates
+                const existingFrames = new Set(targetTrack.frames.map(f => f.frame));
+                for (const f of sourceTrack.frames) {
+                    if (!existingFrames.has(f.frame)) {
+                        targetTrack.frames.push(f);
+                        existingFrames.add(f.frame);
+                    }
+                }
+                for (const f of interpolatedFrames) {
+                    if (!existingFrames.has(f.frame)) {
+                        targetTrack.frames.push(f);
+                        existingFrames.add(f.frame);
+                    }
+                }
+
+                targetTrack.frames.sort((a, b) => a.frame - b.frame);
+                targetTrack.start_frame = targetTrack.frames[0].frame;
+                targetTrack.end_frame = targetTrack.frames[targetTrack.frames.length - 1].frame;
+
+                // Remove source
+                tracks = tracks.filter(t => t.track_id !== selectedTrackId);
+                selectedTrackId = targetId;
+
+                const gapMsg = interpolatedFrames.length > 0
+                    ? ` (${interpolatedFrames.length} frames interpolated)` : '';
+                closeModal('mergeModal');
+                renderTracks(currentFilter);
+                drawBoxes();
+                updateActionButtons();
+                updateReviewProgress();
+                showToast(`Tracks merged${gapMsg}`);
+            } else {
+                closeModal('mergeModal');
+            }
+        }
+
+        async function splitTrack() {
+            if (!selectedTrackId) return;
+
+            const track = tracks.find(t => t.track_id === selectedTrackId);
+            if (!track) return;
+
+            const before = track.frames.filter(f => f.frame < currentFrame);
+            const after = track.frames.filter(f => f.frame >= currentFrame);
+
+            if (before.length === 0) {
+                showToast(`Can't split at frame ${currentFrame} - it's at the start of the track. Go to a middle frame.`, true);
+                return;
+            }
+            if (after.length === 0) {
+                showToast(`Can't split at frame ${currentFrame} - it's past the end of the track. Go to a middle frame.`, true);
+                return;
+            }
+
+            saveState();
+
+            // Update original
+            track.frames = before;
+            track.end_frame = before[before.length - 1].frame;
+
+            // Create new
+            const newId = Math.max(...tracks.map(t => t.track_id)) + 1;
+            tracks.push({
+                track_id: newId,
+                class: track.class,
+                class_id: track.class_id,
+                frames: after,
+                start_frame: after[0].frame,
+                end_frame: after[after.length - 1].frame,
+                needs_review: true,
+                avg_confidence: track.avg_confidence
+            });
+
+            renderTracks(currentFilter);
+            drawBoxes();
+            showToast(`Split: new track #${newId}`);
+        }
+
+        async function saveCorrections() {
+            const data = {
+                video_path: "{{ data.video_path }}",
+                video_name: "{{ data.video_name }}",
+                fps: fps,
+                total_frames: totalFrames,
+                resolution: [videoWidth, videoHeight],
+                tracks: tracks,
+                rois: rois,
+                saved_at: new Date().toISOString()
+            };
+
+            try {
+                const res = await fetch(`/api/session/${sessionId}/tracks`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                if (res.ok) {
+                    markSaved();
+                    showToast('Saved!');
+                } else {
+                    showToast('Error saving', true);
+                }
+            } catch (e) {
+                showToast('Network error', true);
+            }
+        }
+
+        // ===== MODALS & TOAST =====
+        function showModal(id) {
+            document.getElementById(id).classList.add('show');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast show' + (isError ? ' error' : '');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        // ===== CONTROLS =====
+        slider.addEventListener('input', () => loadFrame(parseInt(slider.value)));
+        frameInput.addEventListener('change', () => loadFrame(parseInt(frameInput.value) || 0));
+        document.getElementById('prevFrame').onclick = () => loadFrame(currentFrame - 1);
+        document.getElementById('nextFrame').onclick = () => loadFrame(currentFrame + 1);
+        document.getElementById('prev10').onclick = () => loadFrame(currentFrame - 10);
+        document.getElementById('next10').onclick = () => loadFrame(currentFrame + 10);
+
+        document.getElementById('playBtn').onclick = function() {
+            isPlaying = !isPlaying;
+            this.textContent = isPlaying ? 'Pause' : 'Play';
+            this.classList.toggle('active', isPlaying);
+
+            if (isPlaying) {
+                playInterval = setInterval(() => {
+                    if (currentFrame >= totalFrames - 1) {
+                        isPlaying = false;
+                        document.getElementById('playBtn').textContent = 'Play';
+                        document.getElementById('playBtn').classList.remove('active');
+                        clearInterval(playInterval);
+                    } else {
+                        loadFrame(currentFrame + 1);
+                    }
+                }, 100);
+            } else {
+                clearInterval(playInterval);
+            }
+        };
+
+        // Toolbar
+        document.getElementById('selectMode').onclick = () => setDrawMode(false);
+        document.getElementById('drawMode').onclick = () => setDrawMode(true);
+        document.getElementById('undoBtn').onclick = undo;
+        document.getElementById('redoBtn').onclick = redo;
+        document.getElementById('copyBoxBtn').onclick = () => copyBoxToFrame(1);
+        document.getElementById('copyBoxPrevBtn').onclick = () => copyBoxToFrame(-1);
+        document.getElementById('nextReviewBtn').onclick = goToNextReview;
+        document.getElementById('roiRectBtn').onclick = () => {
+            setRoiDrawMode(isRoiDrawMode && roiDrawType === 'rect' ? false : 'rect');
+        };
+        document.getElementById('roiPolyBtn').onclick = () => {
+            setRoiDrawMode(isRoiDrawMode && roiDrawType === 'polygon' ? false : 'polygon');
+        };
+
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderTracks(btn.dataset.filter);
+            };
+        });
+
+        // Action buttons
+        document.getElementById('deleteBtn').onclick = deleteTrack;
+        document.getElementById('classBtn').onclick = () => { if (selectedTrackId) showModal('classModal'); };
+        document.getElementById('mergeBtn').onclick = showMergeModal;
+        document.getElementById('splitBtn').onclick = splitTrack;
+        document.getElementById('saveBtn').onclick = saveCorrections;
+
+        // ===== KEYBOARD =====
+        document.addEventListener('keydown', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+            // Shift shortcuts for ROI
+            if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                if (e.key === 'R') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'rect' ? false : 'rect'); return; }
+                if (e.key === 'P') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'polygon' ? false : 'polygon'); return; }
+            }
+
+            // Ctrl shortcuts
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'z') { e.preventDefault(); undo(); return; }
+                if (e.key === 'y') { e.preventDefault(); redo(); return; }
+                if (e.key === 's') { e.preventDefault(); saveCorrections(); return; }
+            }
+
+            switch(e.key) {
+                case ' ': e.preventDefault(); document.getElementById('playBtn').click(); break;
+                case 'ArrowLeft': e.preventDefault(); loadFrame(currentFrame - 1); break;
+                case 'ArrowRight': e.preventDefault(); loadFrame(currentFrame + 1); break;
+                case 'v': case 'V': setDrawMode(false); break;
+                case 'b': case 'B': setDrawMode(true); break;
+                case 'd': case 'D': if (selectedTrackId) deleteTrack(); break;
+                case 'c': case 'C': if (selectedTrackId) showModal('classModal'); break;
+                case 'm': case 'M': if (selectedTrackId) showMergeModal(); break;
+                case 's': case 'S': if (selectedTrackId && !e.ctrlKey && !e.metaKey) splitTrack(); break;
+                case 'r': if (!e.shiftKey) goToNextReview(); break;
+                case 'n': case 'N': copyBoxToFrame(1); break;
+                case 'p': if (!e.shiftKey) copyBoxToFrame(-1); break;
+                case 'Escape':
+                    closeModal('classModal');
+                    closeModal('mergeModal');
+                    closeModal('newTrackModal');
+                    closeModal('roiNameModal');
+                    if (isDrawMode) setDrawMode(false);
+                    if (isRoiDrawMode) setRoiDrawMode(false);
+                    break;
+            }
+        });
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            if (frameImage.style.display !== 'none') {
+                const rect = frameImage.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+                canvas.style.width = rect.width + 'px';
+                canvas.style.height = rect.height + 'px';
+                drawBoxes();
+            }
+        });
+
+        // Warn before leaving with unsaved changes
+        window.addEventListener('beforeunload', e => {
+            if (hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
+        // ===== INIT =====
+        loadFrame(0);
+        renderTracks('all');
+        updateActionButtons();
+        updateReviewProgress();
+        renderRois();
+    </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Correction UI - Sessions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Video Correction UI</h1>
+            <p>Select a session to review and correct tracks</p>
+        </header>
+
+        <div class="sessions-list">
+            {% if sessions %}
+                <table class="sessions-table">
+                    <thead>
+                        <tr>
+                            <th>Video</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for session in sessions %}
+                        <tr>
+                            <td>
+                                <strong>{{ session.video_name }}</strong>
+                                <br>
+                                <small>ID: {{ session.id }}</small>
+                            </td>
+                            <td>
+                                {% if session.has_tracks %}
+                                    <span class="badge badge-success">✓ Has Tracks</span>
+                                {% else %}
+                                    <span class="badge badge-warning">⚠ No Tracks</span>
+                                {% endif %}
+                                {% if session.has_annotations %}
+                                    <span class="badge badge-info">✓ Annotated</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if session.has_tracks %}
+                                    <a href="{{ url_for('review', session_id=session.id) }}" 
+                                       class="btn btn-primary">Review</a>
+                                {% else %}
+                                    <span class="text-muted">Process video first</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty-state">
+                    <p>No sessions found.</p>
+                    <p>Place videos in <code>data/videos/</code> and process them to create tracks.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <footer>
+            <p>Place videos in <code>data/videos/</code> and process with:</p>
+            <code>python scripts/process_video.py --video-path data/videos/your_video.mp4 --camera-id cam_001</code>
+        </footer>
+    </div>
+</body>
+</html>
+

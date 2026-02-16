@@ -1,0 +1,54 @@
+# Core Computer Vision
+ultralytics>=8.0.0          # YOLO detection (includes YOLOv8)
+opencv-python>=4.8.0        # Video processing, image ops
+opencv-contrib-python>=4.8.0  # Additional OpenCV features
+numpy>=1.24.0               # Numerical operations
+Pillow>=10.0.0              # Image processing
+
+# Multi-Object Tracking
+# Option 1: ByteTrack (recommended - lightweight, fast)
+# Install from GitHub: pip install git+https://github.com/ifzhang/ByteTrack.git
+# OR use bytetrack package if available: pip install bytetrack
+# OR Option 2: DeepSORT (better for occlusions, heavier)
+# deep-sort-realtime>=1.3.0
+# OR Option 3: BoT-SORT (strong variant)
+# bot-sort>=1.0.0
+# Note: We'll implement ByteTrack wrapper manually or use available package
+
+# Data Processing
+pandas>=2.0.0               # Dataframes, analytics
+pyarrow>=12.0.0             # Parquet support
+scipy>=1.11.0               # Scientific computing (for Kalman filters, etc.)
+
+# Web UI (Correction Tool)
+flask>=3.0.0                # Web framework (lightweight)
+flask-cors>=4.0.0           # CORS support
+# OR FastAPI (alternative, more modern)
+# fastapi>=0.104.0
+# uvicorn>=0.24.0
+
+# Video Processing
+ffmpeg-python>=0.2.0        # FFmpeg wrapper (optional, for advanced video ops)
+imageio>=2.31.0             # Video I/O alternative
+imageio-ffmpeg>=0.4.9       # FFmpeg plugin for imageio
+
+# Utilities
+tqdm>=4.66.0                # Progress bars
+pyyaml>=6.0.0               # Config files
+python-dotenv>=1.0.0        # Environment variables
+click>=8.1.0                # CLI interface
+
+# Optional: For better performance
+torch>=2.0.0                # PyTorch (usually installed with ultralytics)
+torchvision>=0.15.0         # Torch vision ops
+
+# Optional: For advanced features
+scikit-learn>=1.3.0         # ML utilities (for active learning prioritization)
+matplotlib>=3.7.0           # Visualization (for debugging/plots)
+seaborn>=0.12.0             # Statistical plots
+
+# Development (optional)
+pytest>=7.4.0               # Testing
+black>=23.0.0               # Code formatting
+flake8>=6.1.0               # Linting
+
