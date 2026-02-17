@@ -30,7 +30,7 @@ The latest version. A native desktop application built with **PySide6/Qt** that 
 - COCO format export
 - Builds to `.dmg` (macOS) and `.exe` (Windows) via PyInstaller
 
-**Quick Start:**
+**Quick Start (NOT Recommended):**
 ```bash
 cd software2
 python -m venv .venv
@@ -40,13 +40,15 @@ pip install -r requirements.txt
 python run.py
 ```
 
-**Build Installers:**
+**Build Installers (Recommended):**
 ```bash
 # macOS → .dmg
 chmod +x build_mac.sh && ./build_mac.sh
 
 # Windows → .exe
 build_windows.bat
+
+Open exe/dmg in dist folder that appears or in directory!
 ```
 
 **Key Modules:**
