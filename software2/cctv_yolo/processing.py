@@ -2,7 +2,7 @@
 Background processing workers using QThread + signals.
 Replaces Flask's threading + polling pattern with instant signal-based updates.
 """
-import time
+import traceback
 from PySide6.QtCore import QThread, Signal
 
 
@@ -30,6 +30,7 @@ class ProcessingWorker(QThread):
         model: str = "yolov8m.pt",
         conf: float = 0.25,
         session_id: str = "",
+        models_dir: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -38,11 +39,15 @@ class ProcessingWorker(QThread):
         self.model = model
         self.conf = conf
         self.session_id = session_id
+        self.models_dir = models_dir
 
     def run(self):
         try:
             self.progress.emit(self.session_id, 0)
             from cctv_yolo.processor import process_video
+
+            def _on_progress(pct):
+                self.progress.emit(self.session_id, min(pct, 99))
 
             process_video(
                 self.video_path,
@@ -50,11 +55,16 @@ class ProcessingWorker(QThread):
                 self.model,
                 self.conf,
                 session_id=self.session_id,
+                progress_callback=_on_progress,
+                models_dir=self.models_dir if self.models_dir else None,
             )
             self.progress.emit(self.session_id, 100)
             self.finished.emit(self.session_id)
         except Exception as e:
-            self.error.emit(self.session_id, str(e))
+            tb = traceback.format_exc()
+            error_msg = f"{e}\n\n{tb}"
+            print(f"[ProcessingWorker] Error processing {self.session_id}:\n{tb}")
+            self.error.emit(self.session_id, error_msg)
 
 
 class ExportWorker(QThread):

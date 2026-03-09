@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from tqdm import tqdm
 from ultralytics import YOLO
 
 
@@ -23,7 +22,8 @@ VEHICLE_CLASSES = {
 
 def process_video(video_path: str, output_dir: str = "data/tracks",
                   model_name: str = "yolov8m.pt", conf_threshold: float = 0.25,
-                  feedback_file: str = None, session_id: str = None) -> dict:
+                  feedback_file: str = None, session_id: str = None,
+                  progress_callback=None, models_dir: str = None) -> dict:
     """
     Process a video file: detect vehicles and track them across frames.
 
@@ -34,6 +34,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         conf_threshold: Minimum confidence threshold
         feedback_file: Optional path to feedback file for confidence adjustment
         session_id: Optional session_id for output filename (defaults to video stem)
+        progress_callback: Optional callable(percent: int) for progress updates
+        models_dir: Optional path to local models directory. If not given,
+                    defaults to ~/Documents/CCTV-YOLO/models/
 
     Returns:
         dict with tracks data
@@ -45,6 +48,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
+    if not video_path.is_file():
+        raise ValueError(f"Video path is not a file: {video_path}")
+
     # Load feedback for confidence adjustment if available
     confidence_adjustments = {}
     if feedback_file and Path(feedback_file).exists():
@@ -53,9 +59,29 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             confidence_adjustments = feedback.get('confidence_adjustments', {})
         print(f"Loaded confidence adjustments from feedback")
 
-    # Load YOLO model
-    print(f"Loading model: {model_name}")
-    model = YOLO(model_name)
+    # Load YOLO model — check local models dir first to avoid downloading
+    if models_dir:
+        _models_dir = Path(models_dir)
+    else:
+        _models_dir = Path.home() / "Documents" / "CCTV-YOLO" / "models"
+    _models_dir.mkdir(parents=True, exist_ok=True)
+
+    local_model = _models_dir / model_name
+    try:
+        if local_model.exists():
+            print(f"Loading model from local: {local_model}")
+            model = YOLO(str(local_model))
+        else:
+            print(f"Loading model: {model_name} (will download if not cached)")
+            model = YOLO(model_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load YOLO model '{model_name}'. "
+            f"Checked local path: {local_model}\n"
+            f"If you have no internet connection, place the model file in:\n"
+            f"  {_models_dir}\n\n"
+            f"Original error: {e}"
+        ) from e
 
     # Open video
     cap = cv2.VideoCapture(str(video_path))
@@ -86,7 +112,15 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     # Collect tracks
     tracks_dict = {}  # track_id -> track data
 
-    for frame_idx, result in enumerate(tqdm(results, total=total_frames, desc="Processing")):
+    last_pct = 0
+    for frame_idx, result in enumerate(results):
+        # Report progress
+        if progress_callback and total_frames > 0:
+            pct = int((frame_idx + 1) / total_frames * 100)
+            if pct != last_pct:
+                progress_callback(pct)
+                last_pct = pct
+
         if result.boxes is None or len(result.boxes) == 0:
             continue
 
@@ -147,7 +181,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         'video_name': video_path.name,
         'fps': fps,
         'total_frames': total_frames,
-        'resolution': [width, height],
+        'resolution': f"{width}x{height}",
         'processed_at': datetime.now().isoformat(),
         'model': model_name,
         'conf_threshold': conf_threshold,

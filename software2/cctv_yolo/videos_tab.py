@@ -196,7 +196,7 @@ def _numpy_to_pixmap(bgr_array, max_width=300):
     rgb = cv2.cvtColor(bgr_array, cv2.COLOR_BGR2RGB)
     h, w, ch = rgb.shape
     bytes_per_line = ch * w
-    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
     pixmap = QPixmap.fromImage(qimg)
     if pixmap.width() > max_width:
         pixmap = pixmap.scaledToWidth(max_width, Qt.SmoothTransformation)
@@ -390,7 +390,7 @@ class VideosTab(QWidget):
             if pixmap:
                 thumb_label.setPixmap(
                     pixmap.scaled(
-                        thumb_label.size(),
+                        320, 160,
                         Qt.KeepAspectRatio,
                         Qt.SmoothTransformation,
                     )
@@ -564,6 +564,7 @@ class VideosTab(QWidget):
             model=model,
             conf=conf,
             session_id=session_id,
+            models_dir=str(self.data_manager.models_dir),
         )
         worker.progress.connect(self._on_processing_progress)
         worker.finished.connect(self._on_processing_finished)
@@ -584,15 +585,30 @@ class VideosTab(QWidget):
             self._card_widgets[session_id]["progress"].setValue(percent)
 
     def _on_processing_finished(self, session_id):
-        self.data_manager.set_processing_status(session_id, "processed", progress=100)
-        self._workers.pop(session_id, None)
+        # Clear job entry — the track file on disk is the source of truth for "processed"
+        self.data_manager.clear_processing_job(session_id)
+        worker = self._workers.pop(session_id, None)
+        if worker:
+            worker.wait()  # ensure thread fully stops before refresh
         self.refresh()
 
     def _on_processing_error(self, session_id, error_msg):
-        self.data_manager.set_processing_status(session_id, "error", error=error_msg)
-        self._workers.pop(session_id, None)
-        QMessageBox.critical(self, "Processing Error", f"Error processing {session_id}:\n{error_msg}")
+        # Clear processing status so card reverts to "unprocessed" (not stuck on "processing")
+        self.data_manager.clear_processing_job(session_id)
+        worker = self._workers.pop(session_id, None)
+        if worker:
+            worker.wait()
         self.refresh()
+        # Show error after refresh so the dialog doesn't block the UI update
+        # Truncate very long tracebacks for the dialog but keep the key message
+        display_msg = error_msg
+        if len(display_msg) > 800:
+            # Show the first line (exception message) and the last few lines (traceback tail)
+            lines = display_msg.split('\n')
+            first_line = lines[0]
+            tail = '\n'.join(lines[-10:])
+            display_msg = f"{first_line}\n\n... (truncated) ...\n\n{tail}"
+        QMessageBox.critical(self, "Processing Error", f"Error processing {session_id}:\n\n{display_msg}")
 
     def _process_all_unprocessed(self):
         """Start processing all unprocessed videos."""
