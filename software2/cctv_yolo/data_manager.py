@@ -61,6 +61,68 @@ class DataManager:
             d.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
+    # Model management
+    # ------------------------------------------------------------------
+
+    def list_models(self) -> list[str]:
+        """Return a list of .pt model files available in the models directory."""
+        if not self.models_dir.exists():
+            return []
+        return sorted(f.name for f in self.models_dir.glob("*.pt"))
+
+    def get_last_model(self) -> str | None:
+        """Read the last-used model name from config."""
+        config_file = self.config_dir / "model_config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+                return data.get("last_model")
+            except (json.JSONDecodeError, OSError):
+                pass
+        return None
+
+    def set_last_model(self, model_name: str):
+        """Save the last-used model name to config."""
+        config_file = self.config_dir / "model_config.json"
+        data = {}
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        data["last_model"] = model_name
+        with open(config_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+    def get_last_confidence(self) -> float:
+        """Read the last-used confidence threshold from config."""
+        config_file = self.config_dir / "model_config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+                return float(data.get("last_confidence", 0.25))
+            except (json.JSONDecodeError, OSError, ValueError):
+                pass
+        return 0.25
+
+    def set_last_confidence(self, conf: float):
+        """Save the last-used confidence threshold to config."""
+        config_file = self.config_dir / "model_config.json"
+        data = {}
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        data["last_confidence"] = conf
+        with open(config_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+    # ------------------------------------------------------------------
     # Mode switching (local <-> NAS)
     # ------------------------------------------------------------------
 
@@ -440,6 +502,7 @@ class DataManager:
             "tracks": self.tracks_dir,
             "corrections": self.corrections_dir,
             "exports": self.exports_dir,
+            "models": self.models_dir,
         }
         path = folder_map.get(folder_type)
         if not path:

@@ -1,11 +1,12 @@
 """
-Main window — the primary application window with tab-based navigation.
+Main window -- the primary application window with tab-based navigation.
 
 Contains:
 - Menu bar: File, View, Help
-- QTabWidget: Sessions, Videos, Settings
+- QTabWidget: Preprocessing, Correction, Performance
 - Status bar with mode badge
 - Review window management
+- Settings dialog (File > Settings)
 """
 import shutil
 from pathlib import Path
@@ -23,9 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from cctv_yolo.data_manager import DataManager
-from cctv_yolo.sessions_tab import SessionsTab
-from cctv_yolo.videos_tab import VideosTab
-from cctv_yolo.settings_tab import SettingsTab
+from cctv_yolo.preprocessing_tab import PreprocessingTab
+from cctv_yolo.correction_tab import CorrectionTab
+from cctv_yolo.performance_tab import PerformanceTab
+from cctv_yolo.settings_dialog import SettingsDialog
 from cctv_yolo.review_window import ReviewWindow
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.data_manager = data_manager
         self._review_windows = []  # keep references to open review windows
+        self._settings_dialog = None  # lazy-created
 
         self._setup_ui()
         self._setup_menu()
@@ -95,7 +98,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         # Auto-reconnect NAS on startup
-        self.settings_tab.check_auto_reconnect()
+        self._check_auto_reconnect()
         self._update_mode_badge()
 
     # ------------------------------------------------------------------
@@ -107,18 +110,17 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
-        self.sessions_tab = SessionsTab(self.data_manager)
-        self.videos_tab = VideosTab(self.data_manager)
-        self.settings_tab = SettingsTab(self.data_manager)
+        self.preprocessing_tab = PreprocessingTab(self.data_manager)
+        self.correction_tab = CorrectionTab(self.data_manager)
+        self.performance_tab = PerformanceTab(self.data_manager)
 
-        self.tabs.addTab(self.sessions_tab, "Sessions")
-        self.tabs.addTab(self.videos_tab, "Videos")
-        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.addTab(self.preprocessing_tab, "Preprocessing")
+        self.tabs.addTab(self.correction_tab, "Correction")
+        self.tabs.addTab(self.performance_tab, "Performance")
 
         # Connect signals
-        self.sessions_tab.review_requested.connect(self.open_review)
-        self.videos_tab.review_requested.connect(self.open_review)
-        self.settings_tab.mode_changed.connect(self._on_mode_changed)
+        self.preprocessing_tab.review_requested.connect(self.open_review)
+        self.correction_tab.review_requested.connect(self.open_review)
 
         # --- Status bar ---
         self.status = QStatusBar()
@@ -151,6 +153,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        action_settings = QAction("Settings...", self)
+        action_settings.setShortcut(QKeySequence("Ctrl+,"))
+        action_settings.triggered.connect(self._open_settings)
+        file_menu.addAction(action_settings)
+
+        file_menu.addSeparator()
+
         action_quit = QAction("Quit", self)
         action_quit.setShortcut(QKeySequence("Ctrl+Q"))
         action_quit.triggered.connect(self.close)
@@ -159,20 +168,20 @@ class MainWindow(QMainWindow):
         # --- View menu ---
         view_menu = menubar.addMenu("View")
 
-        action_sessions = QAction("Sessions", self)
-        action_sessions.setShortcut(QKeySequence("Ctrl+1"))
-        action_sessions.triggered.connect(lambda: self.tabs.setCurrentIndex(0))
-        view_menu.addAction(action_sessions)
+        action_preprocessing = QAction("Preprocessing", self)
+        action_preprocessing.setShortcut(QKeySequence("Ctrl+1"))
+        action_preprocessing.triggered.connect(lambda: self.tabs.setCurrentIndex(0))
+        view_menu.addAction(action_preprocessing)
 
-        action_videos = QAction("Videos", self)
-        action_videos.setShortcut(QKeySequence("Ctrl+2"))
-        action_videos.triggered.connect(lambda: self.tabs.setCurrentIndex(1))
-        view_menu.addAction(action_videos)
+        action_correction = QAction("Correction", self)
+        action_correction.setShortcut(QKeySequence("Ctrl+2"))
+        action_correction.triggered.connect(lambda: self.tabs.setCurrentIndex(1))
+        view_menu.addAction(action_correction)
 
-        action_settings = QAction("Settings", self)
-        action_settings.setShortcut(QKeySequence("Ctrl+3"))
-        action_settings.triggered.connect(lambda: self.tabs.setCurrentIndex(2))
-        view_menu.addAction(action_settings)
+        action_performance = QAction("Performance", self)
+        action_performance.setShortcut(QKeySequence("Ctrl+3"))
+        action_performance.triggered.connect(lambda: self.tabs.setCurrentIndex(2))
+        view_menu.addAction(action_performance)
 
         # --- Help menu ---
         help_menu = menubar.addMenu("Help")
@@ -185,6 +194,29 @@ class MainWindow(QMainWindow):
         action_shortcuts.setShortcut(QKeySequence("Ctrl+/"))
         action_shortcuts.triggered.connect(self._show_shortcuts)
         help_menu.addAction(action_shortcuts)
+
+    # ------------------------------------------------------------------
+    # Settings dialog
+    # ------------------------------------------------------------------
+
+    def _open_settings(self):
+        """Open the settings dialog."""
+        dlg = SettingsDialog(self.data_manager, parent=self)
+        dlg.mode_changed.connect(self._on_mode_changed)
+        dlg.exec()
+
+    def _check_auto_reconnect(self):
+        """Auto-reconnect NAS on startup if previously connected."""
+        from cctv_yolo.nas_manager import NasManager
+        nas_manager = NasManager(self.data_manager.config_dir / "nas.json")
+        mount_point = nas_manager.check_auto_reconnect()
+        if mount_point:
+            self.data_manager.switch_to_nas(mount_point)
+            self._update_mode_badge()
+            config = nas_manager.load_config()
+            ip = config.get("ip", "?") if config else "?"
+            share = config.get("share", "?") if config else "?"
+            self.status.showMessage(f"Auto-reconnected to NAS //{ip}/{share}")
 
     # ------------------------------------------------------------------
     # Review window
@@ -210,19 +242,21 @@ class MainWindow(QMainWindow):
         if review_win in self._review_windows:
             self._review_windows.remove(review_win)
         # Refresh tabs to reflect any saved corrections
-        self.sessions_tab.refresh()
-        self.videos_tab.refresh()
+        self.preprocessing_tab.refresh()
+        self.correction_tab.refresh()
+        self.performance_tab.refresh()
 
     # ------------------------------------------------------------------
     # Mode changes
     # ------------------------------------------------------------------
 
     def _on_mode_changed(self, mode):
-        """Handle NAS connect/disconnect from settings tab."""
+        """Handle NAS connect/disconnect from settings dialog."""
         self._update_mode_badge()
         # Refresh tabs with new data directories
-        self.sessions_tab.refresh()
-        self.videos_tab.refresh()
+        self.preprocessing_tab.refresh()
+        self.correction_tab.refresh()
+        self.performance_tab.refresh()
         self.status.showMessage(f"Switched to {mode.upper()} mode")
 
     def _update_mode_badge(self):
@@ -266,7 +300,7 @@ class MainWindow(QMainWindow):
         try:
             shutil.copy2(str(src), str(dest))
             self.status.showMessage(f"Imported: {src.name}")
-            self.videos_tab.refresh()
+            self.preprocessing_tab.refresh()
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import video:\n{e}")
 
@@ -308,6 +342,7 @@ class MainWindow(QMainWindow):
             "Main Window Shortcuts\n"
             "=====================\n\n"
             "Ctrl+I         Import video\n"
+            "Ctrl+,         Settings\n"
             "Ctrl+Q         Quit\n"
             "Ctrl+1/2/3     Switch tabs\n"
             "Ctrl+/         Show this dialog\n"
