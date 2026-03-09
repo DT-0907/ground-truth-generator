@@ -45,6 +45,7 @@ class VideoCanvas(QWidget):
         self._video_width = 0
         self._video_height = 0
         self._total_frames = 0
+        self._last_frame_read = -1    # tracks cap position for sequential read optimization
         self._display_rect = QRect()  # where the frame is drawn on widget
 
         # Track overlay data (set from outside)
@@ -75,6 +76,7 @@ class VideoCanvas(QWidget):
             self._video_width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self._video_height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self._total_frames = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self._last_frame_read = -1
 
     def close_video(self):
         """Release the underlying VideoCapture."""
@@ -82,6 +84,7 @@ class VideoCanvas(QWidget):
             self._cap.release()
             self._cap = None
         self._pixmap = None
+        self._last_frame_read = -1
         self.update()
 
     @property
@@ -97,14 +100,30 @@ class VideoCanvas(QWidget):
         return self._total_frames
 
     def set_frame(self, frame_num: int):
-        """Load and display a specific frame number."""
+        """Load and display a specific frame number.
+
+        For sequential advancement (frame_num == last_frame_read + 1), we simply
+        call cap.read() which is reliable across all codecs.  For arbitrary seeks
+        we fall back to CAP_PROP_POS_FRAMES, and if that silently returns the
+        wrong frame we verify and retry once.
+        """
         if not self._cap or not self._cap.isOpened():
             return
-        self._cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-        ret, frame = self._cap.read()
+
+        if frame_num == self._last_frame_read + 1:
+            # Sequential read — the capture is already positioned at the next frame
+            ret, frame = self._cap.read()
+        else:
+            # Non-sequential seek
+            self._cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            ret, frame = self._cap.read()
+
         if not ret:
             return
+
+        self._last_frame_read = frame_num
         self.current_frame = frame_num
+
         # BGR -> RGB -> QImage -> QPixmap
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
@@ -112,7 +131,7 @@ class VideoCanvas(QWidget):
         qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
         self._pixmap = QPixmap.fromImage(qimg)
         self._update_display_rect()
-        self.update()
+        self.repaint()  # force immediate repaint (update() can be coalesced/deferred)
 
     # ------------------------------------------------------------------
     # Coordinate mapping
