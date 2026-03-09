@@ -1,17 +1,37 @@
 /**
  * Correction UI JavaScript
- * Handles video playback, track overlay, and corrections
+ * Canvas-based frame playback, bbox overlay + resize, ROI filtering
  */
 
 let currentSession = null;
 let tracksData = null;
 let selectedTrackId = null;
 let currentFrame = 0;
-let video = null;
-let canvas = null;
-let ctx = null;
+let totalFrames = 0;
+let videoFps = 30;
+let videoWidth = 0;
+let videoHeight = 0;
 
-// Vehicle class colors (COCO classes)
+let frameCanvas = null;
+let frameCtx = null;
+let overlayCanvas = null;
+let overlayCtx = null;
+
+let isPlaying = false;
+let playTimer = null;
+
+// Bbox resize state
+let resizeHandle = null;   // which handle is being dragged
+let resizeTrackId = null;
+let resizeOrigBbox = null;
+let resizeStart = null;     // {x, y} in video coords
+let isDraggingBbox = false; // move whole bbox
+
+// ROI filter
+let roiFilterEnabled = false;
+let rois = [];              // loaded from tracks data
+
+// Vehicle class colors
 const CLASS_COLORS = {
     'car': '#FF6B6B',
     'truck': '#4ECDC4',
@@ -21,236 +41,568 @@ const CLASS_COLORS = {
     'person': '#F7DC6F'
 };
 
-// Make initReviewApp globally accessible
+const HANDLE_SIZE = 8;
+const HANDLES = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
+
+// ---------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------
 window.initReviewApp = function(sessionId, videoPath, trackPath) {
     currentSession = sessionId;
-    
-    video = document.getElementById('videoPlayer');
-    canvas = document.getElementById('overlayCanvas');
-    if (!video || !canvas) {
-        console.error('Video player or canvas not found');
-        return;
-    }
-    ctx = canvas.getContext('2d');
-    
-    // Load tracks
-    loadTracks(trackPath);
-    
-    // Setup video event listeners
-    setupVideoListeners();
-    
-    // Setup UI controls
+
+    frameCanvas = document.getElementById('frameCanvas');
+    overlayCanvas = document.getElementById('overlayCanvas');
+    if (!frameCanvas || !overlayCanvas) { console.error('Canvas not found'); return; }
+    frameCtx = frameCanvas.getContext('2d');
+    overlayCtx = overlayCanvas.getContext('2d');
+
+    // Load video info then tracks
+    fetch(`/api/video-info/${sessionId}`)
+        .then(r => r.json())
+        .then(info => {
+            videoFps = info.fps || 30;
+            totalFrames = info.total_frames || 0;
+            videoWidth = info.width || 1920;
+            videoHeight = info.height || 1080;
+
+            frameCanvas.width = videoWidth;
+            frameCanvas.height = videoHeight;
+            overlayCanvas.width = videoWidth;
+            overlayCanvas.height = videoHeight;
+
+            document.getElementById('totalFrames').textContent = totalFrames;
+            const scrubber = document.getElementById('frameScrubber');
+            if (scrubber) { scrubber.max = Math.max(0, totalFrames - 1); }
+
+            loadFrame(0);
+        })
+        .catch(e => console.error('Error loading video info:', e));
+
+    loadTracks();
     setupControls();
-    
-    // Setup keyboard shortcuts
     setupKeyboardShortcuts();
+    setupOverlayInteraction();
 };
 
-function loadTracks(trackPath) {
-    if (!trackPath) {
-        showStatus('No track file found', 'error');
-        document.getElementById('tracksList').innerHTML = '<p class="loading">No tracks available</p>';
-        return;
-    }
-    
+// ---------------------------------------------------------------
+// Track loading
+// ---------------------------------------------------------------
+function loadTracks() {
     fetch(`/api/session/${currentSession}/tracks`)
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
+            if (data.error) {
+                showStatus('No tracks: ' + data.error, 'error');
+                document.getElementById('tracksList').innerHTML = '<p class="loading">No tracks available</p>';
+                return;
+            }
             tracksData = data;
+            if (data.fps) videoFps = data.fps;
+            rois = data.rois || [];
             renderTracksList();
             updateOverlay();
         })
-        .catch(error => {
-            console.error('Error loading tracks:', error);
-            showStatus('Error loading tracks: ' + error.message, 'error');
-        });
+        .catch(err => showStatus('Error loading tracks: ' + err.message, 'error'));
 }
 
-function setupVideoListeners() {
-    if (!video || !canvas) return;
-    
-    video.addEventListener('loadedmetadata', () => {
-        // Set canvas size to match video
-        if (video.videoWidth && video.videoHeight) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+// ---------------------------------------------------------------
+// Frame loading (canvas-based)
+// ---------------------------------------------------------------
+function loadFrame(frameNum) {
+    frameNum = Math.max(0, Math.min(frameNum, totalFrames - 1));
+    currentFrame = frameNum;
+    updateFrameInfo();
+
+    const img = new Image();
+    img.onload = () => {
+        frameCtx.drawImage(img, 0, 0, frameCanvas.width, frameCanvas.height);
+        updateOverlay();
+    };
+    img.onerror = () => {
+        frameCtx.fillStyle = '#111';
+        frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+        frameCtx.fillStyle = '#666';
+        frameCtx.font = '24px sans-serif';
+        frameCtx.fillText('Frame not available', 40, 40);
+    };
+    img.src = `/frame/${currentSession}/${frameNum}`;
+}
+
+function playVideo() {
+    if (isPlaying) return;
+    isPlaying = true;
+    document.getElementById('playPause').textContent = 'Pause';
+    const interval = 1000 / videoFps;
+    playTimer = setInterval(() => {
+        if (currentFrame >= totalFrames - 1) { pauseVideo(); return; }
+        loadFrame(currentFrame + 1);
+    }, interval);
+}
+
+function pauseVideo() {
+    isPlaying = false;
+    document.getElementById('playPause').textContent = 'Play';
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+}
+
+// ---------------------------------------------------------------
+// Overlay drawing
+// ---------------------------------------------------------------
+function updateOverlay() {
+    if (!overlayCtx || !tracksData) return;
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    const tracks = getFilteredTracks();
+
+    tracks.forEach(track => {
+        const fd = track.frames?.find(f => f.frame === currentFrame);
+        if (!fd || !fd.bbox) return;
+
+        const [x1, y1, x2, y2] = fd.bbox;
+        const isSelected = track.track_id === selectedTrackId;
+
+        // Bbox
+        overlayCtx.strokeStyle = isSelected ? '#FFFF00' : (CLASS_COLORS[track.class] || '#FFFFFF');
+        overlayCtx.lineWidth = isSelected ? 3 : 2;
+        overlayCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+        // Label
+        const label = `#${track.track_id} ${track.class || ''} ${(fd.conf || 0).toFixed(2)}`;
+        overlayCtx.font = '14px Arial';
+        const lw = overlayCtx.measureText(label).width;
+        overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        overlayCtx.fillRect(x1, y1 - 20, lw + 6, 20);
+        overlayCtx.fillStyle = isSelected ? '#FFFF00' : (CLASS_COLORS[track.class] || '#FFFFFF');
+        overlayCtx.fillText(label, x1 + 3, y1 - 5);
+
+        // Resize handles for selected track
+        if (isSelected) {
+            drawResizeHandles(x1, y1, x2, y2);
         }
-        
-        // Update frame info
-        updateFrameInfo();
     });
-    
-    video.addEventListener('timeupdate', () => {
-        if (video && video.readyState) {
-            currentFrame = Math.floor((video.currentTime || 0) * (tracksData?.fps || 30));
-            updateFrameInfo();
+
+    // Draw ROIs
+    rois.forEach(roi => {
+        overlayCtx.strokeStyle = 'rgba(78, 204, 163, 0.7)';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([6, 4]);
+        const pts = roi.points || [];
+        if (roi.type === 'rect' && pts.length >= 2) {
+            const rx = Math.min(pts[0].x, pts[1].x);
+            const ry = Math.min(pts[0].y, pts[1].y);
+            const rw = Math.abs(pts[1].x - pts[0].x);
+            const rh = Math.abs(pts[1].y - pts[0].y);
+            overlayCtx.strokeRect(rx, ry, rw, rh);
+        } else if (pts.length >= 3) {
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) overlayCtx.lineTo(pts[i].x, pts[i].y);
+            overlayCtx.closePath();
+            overlayCtx.stroke();
+        }
+        overlayCtx.setLineDash([]);
+    });
+}
+
+function drawResizeHandles(x1, y1, x2, y2) {
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const positions = {
+        tl: [x1, y1], tc: [mx, y1], tr: [x2, y1],
+        ml: [x1, my],              mr: [x2, my],
+        bl: [x1, y2], bc: [mx, y2], br: [x2, y2]
+    };
+
+    overlayCtx.fillStyle = '#FFFF00';
+    overlayCtx.strokeStyle = '#000';
+    overlayCtx.lineWidth = 1;
+    for (const [, [hx, hy]] of Object.entries(positions)) {
+        overlayCtx.fillRect(hx - HANDLE_SIZE / 2, hy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        overlayCtx.strokeRect(hx - HANDLE_SIZE / 2, hy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+    }
+}
+
+// ---------------------------------------------------------------
+// ROI filtering
+// ---------------------------------------------------------------
+function getFilteredTracks() {
+    let tracks = tracksData?.tracks || [];
+    if (roiFilterEnabled && rois.length > 0) {
+        tracks = tracks.filter(track => {
+            return track.frames?.some(fd => {
+                if (!fd.bbox) return false;
+                return rois.some(roi => bboxInRoi(fd.bbox, roi));
+            });
+        });
+    }
+    return tracks;
+}
+
+function bboxInRoi(bbox, roi) {
+    const cx = (bbox[0] + bbox[2]) / 2;
+    const cy = (bbox[1] + bbox[3]) / 2;
+    const pts = roi.points || [];
+    if (roi.type === 'rect' && pts.length >= 2) {
+        const x1 = Math.min(pts[0].x, pts[1].x), y1 = Math.min(pts[0].y, pts[1].y);
+        const x2 = Math.max(pts[0].x, pts[1].x), y2 = Math.max(pts[0].y, pts[1].y);
+        return cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2;
+    } else if (pts.length >= 3) {
+        let inside = false, j = pts.length - 1;
+        for (let i = 0; i < pts.length; i++) {
+            const xi = pts[i].x, yi = pts[i].y;
+            const xj = pts[j].x, yj = pts[j].y;
+            if ((yi > cy) !== (yj > cy) && (cx < (xj - xi) * (cy - yi) / (yj - yi) + xi))
+                inside = !inside;
+            j = i;
+        }
+        return inside;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------
+// Overlay interaction: click to select, drag to resize bbox
+// ---------------------------------------------------------------
+function setupOverlayInteraction() {
+    overlayCanvas.style.pointerEvents = 'auto';
+
+    overlayCanvas.addEventListener('mousedown', e => {
+        const pos = canvasCoords(e);
+        if (!tracksData) return;
+
+        // Check if we clicked on a resize handle of the selected track
+        if (selectedTrackId !== null) {
+            const handle = hitTestHandle(pos);
+            if (handle) {
+                const track = tracksData.tracks.find(t => t.track_id === selectedTrackId);
+                const fd = track?.frames?.find(f => f.frame === currentFrame);
+                if (fd && fd.bbox) {
+                    resizeHandle = handle;
+                    resizeTrackId = selectedTrackId;
+                    resizeOrigBbox = [...fd.bbox];
+                    resizeStart = pos;
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            // Check if clicked inside selected bbox (drag move)
+            const selTrack = tracksData.tracks.find(t => t.track_id === selectedTrackId);
+            const selFd = selTrack?.frames?.find(f => f.frame === currentFrame);
+            if (selFd && selFd.bbox) {
+                const [bx1, by1, bx2, by2] = selFd.bbox;
+                if (pos.x >= bx1 && pos.x <= bx2 && pos.y >= by1 && pos.y <= by2) {
+                    isDraggingBbox = true;
+                    resizeTrackId = selectedTrackId;
+                    resizeOrigBbox = [...selFd.bbox];
+                    resizeStart = pos;
+                    e.preventDefault();
+                    return;
+                }
+            }
+        }
+
+        // Click on a bbox to select it
+        const tracks = getFilteredTracks();
+        let clicked = null;
+        for (const track of tracks) {
+            const fd = track.frames?.find(f => f.frame === currentFrame);
+            if (!fd || !fd.bbox) continue;
+            const [bx1, by1, bx2, by2] = fd.bbox;
+            if (pos.x >= bx1 && pos.x <= bx2 && pos.y >= by1 && pos.y <= by2) {
+                clicked = track.track_id;
+            }
+        }
+        if (clicked !== null) {
+            selectTrack(clicked);
+        } else {
+            selectedTrackId = null;
+            renderTracksList();
+            updateSelectedTrackInfo();
+            updateActionButtons();
             updateOverlay();
         }
     });
-    
-    video.addEventListener('play', () => {
-        document.getElementById('playPause').textContent = '⏸ Pause';
+
+    overlayCanvas.addEventListener('mousemove', e => {
+        const pos = canvasCoords(e);
+
+        if (resizeHandle && resizeOrigBbox) {
+            const dx = pos.x - resizeStart.x;
+            const dy = pos.y - resizeStart.y;
+            const newBbox = applyResize(resizeOrigBbox, resizeHandle, dx, dy);
+            updateTrackBbox(resizeTrackId, currentFrame, newBbox);
+            updateOverlay();
+            return;
+        }
+
+        if (isDraggingBbox && resizeOrigBbox) {
+            const dx = pos.x - resizeStart.x;
+            const dy = pos.y - resizeStart.y;
+            const [ox1, oy1, ox2, oy2] = resizeOrigBbox;
+            updateTrackBbox(resizeTrackId, currentFrame, [ox1 + dx, oy1 + dy, ox2 + dx, oy2 + dy]);
+            updateOverlay();
+            return;
+        }
+
+        // Cursor hint
+        if (selectedTrackId !== null) {
+            const handle = hitTestHandle(pos);
+            if (handle) {
+                overlayCanvas.style.cursor = handleCursor(handle);
+            } else {
+                const t = tracksData?.tracks?.find(t => t.track_id === selectedTrackId);
+                const fd = t?.frames?.find(f => f.frame === currentFrame);
+                if (fd && fd.bbox) {
+                    const [bx1, by1, bx2, by2] = fd.bbox;
+                    overlayCanvas.style.cursor = (pos.x >= bx1 && pos.x <= bx2 && pos.y >= by1 && pos.y <= by2) ? 'move' : 'default';
+                } else {
+                    overlayCanvas.style.cursor = 'default';
+                }
+            }
+        } else {
+            overlayCanvas.style.cursor = 'default';
+        }
     });
-    
-    video.addEventListener('pause', () => {
-        document.getElementById('playPause').textContent = '▶ Play';
+
+    overlayCanvas.addEventListener('mouseup', () => {
+        if ((resizeHandle || isDraggingBbox) && resizeTrackId !== null) {
+            // POST the bbox update to the server
+            const track = tracksData?.tracks?.find(t => t.track_id === resizeTrackId);
+            const fd = track?.frames?.find(f => f.frame === currentFrame);
+            if (fd && fd.bbox) {
+                fetch(`/api/session/${currentSession}/bbox`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        track_id: resizeTrackId,
+                        frame: currentFrame,
+                        bbox: fd.bbox.map(v => Math.round(v * 10) / 10)
+                    })
+                });
+            }
+        }
+        resizeHandle = null;
+        resizeTrackId = null;
+        resizeOrigBbox = null;
+        resizeStart = null;
+        isDraggingBbox = false;
     });
 }
 
+function canvasCoords(e) {
+    const rect = overlayCanvas.getBoundingClientRect();
+    const sx = overlayCanvas.width / rect.width;
+    const sy = overlayCanvas.height / rect.height;
+    return {
+        x: (e.clientX - rect.left) * sx,
+        y: (e.clientY - rect.top) * sy
+    };
+}
+
+function hitTestHandle(pos) {
+    if (selectedTrackId === null || !tracksData) return null;
+    const track = tracksData.tracks.find(t => t.track_id === selectedTrackId);
+    const fd = track?.frames?.find(f => f.frame === currentFrame);
+    if (!fd || !fd.bbox) return null;
+
+    const [x1, y1, x2, y2] = fd.bbox;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const positions = {
+        tl: [x1, y1], tc: [mx, y1], tr: [x2, y1],
+        ml: [x1, my],              mr: [x2, my],
+        bl: [x1, y2], bc: [mx, y2], br: [x2, y2]
+    };
+
+    const threshold = HANDLE_SIZE + 4;
+    for (const [name, [hx, hy]] of Object.entries(positions)) {
+        if (Math.abs(pos.x - hx) < threshold && Math.abs(pos.y - hy) < threshold) {
+            return name;
+        }
+    }
+    return null;
+}
+
+function applyResize(orig, handle, dx, dy) {
+    let [x1, y1, x2, y2] = orig;
+    switch (handle) {
+        case 'tl': x1 += dx; y1 += dy; break;
+        case 'tc': y1 += dy; break;
+        case 'tr': x2 += dx; y1 += dy; break;
+        case 'ml': x1 += dx; break;
+        case 'mr': x2 += dx; break;
+        case 'bl': x1 += dx; y2 += dy; break;
+        case 'bc': y2 += dy; break;
+        case 'br': x2 += dx; y2 += dy; break;
+    }
+    // Ensure min size
+    if (x2 - x1 < 10) x2 = x1 + 10;
+    if (y2 - y1 < 10) y2 = y1 + 10;
+    return [x1, y1, x2, y2];
+}
+
+function handleCursor(handle) {
+    const map = {
+        tl: 'nw-resize', tc: 'n-resize', tr: 'ne-resize',
+        ml: 'w-resize', mr: 'e-resize',
+        bl: 'sw-resize', bc: 's-resize', br: 'se-resize'
+    };
+    return map[handle] || 'default';
+}
+
+function updateTrackBbox(trackId, frame, bbox) {
+    if (!tracksData) return;
+    const track = tracksData.tracks.find(t => t.track_id === trackId);
+    if (!track) return;
+    const fd = track.frames?.find(f => f.frame === frame);
+    if (fd) fd.bbox = bbox;
+}
+
+// ---------------------------------------------------------------
+// Controls setup
+// ---------------------------------------------------------------
 function setupControls() {
     const playPauseBtn = document.getElementById('playPause');
-    const prevFrameBtn = document.getElementById('prevFrame');
-    const nextFrameBtn = document.getElementById('nextFrame');
-    
-    if (playPauseBtn) {
-        playPauseBtn.addEventListener('click', () => {
-            if (video && video.readyState) {
-                if (video.paused) {
-                    video.play();
-                } else {
-                    video.pause();
-                }
-            }
-        });
-    }
-    
-    if (prevFrameBtn) {
-        prevFrameBtn.addEventListener('click', () => {
-            if (video && video.readyState) {
-                const fps = tracksData?.fps || 30;
-                video.currentTime = Math.max(0, (video.currentTime || 0) - 1/fps);
-            }
-        });
-    }
-    
-    if (nextFrameBtn) {
-        nextFrameBtn.addEventListener('click', () => {
-            if (video && video.readyState) {
-                const fps = tracksData?.fps || 30;
-                video.currentTime = Math.min(video.duration || 0, (video.currentTime || 0) + 1/fps);
-            }
-        });
-    }
-    
+    const prevBtn = document.getElementById('prevFrame');
+    const nextBtn = document.getElementById('nextFrame');
+    const scrubber = document.getElementById('frameScrubber');
     const saveBtn = document.getElementById('saveBtn');
     const deleteBtn = document.getElementById('deleteTrack');
     const changeClassBtn = document.getElementById('changeClass');
     const splitBtn = document.getElementById('splitTrack');
     const mergeBtn = document.getElementById('mergeTrack');
-    
+    const roiCheck = document.getElementById('roiFilterCheck');
+
+    if (playPauseBtn) playPauseBtn.addEventListener('click', () => { isPlaying ? pauseVideo() : playVideo(); });
+    if (prevBtn) prevBtn.addEventListener('click', () => { pauseVideo(); loadFrame(currentFrame - 1); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { pauseVideo(); loadFrame(currentFrame + 1); });
+
+    if (scrubber) {
+        scrubber.addEventListener('input', () => {
+            pauseVideo();
+            loadFrame(parseInt(scrubber.value));
+        });
+    }
+
     if (saveBtn) saveBtn.addEventListener('click', saveAnnotations);
     if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedTrack);
     if (changeClassBtn) changeClassBtn.addEventListener('click', changeTrackClass);
     if (splitBtn) splitBtn.addEventListener('click', splitSelectedTrack);
     if (mergeBtn) mergeBtn.addEventListener('click', mergeSelectedTrack);
+
+    if (roiCheck) {
+        roiCheck.addEventListener('change', () => {
+            roiFilterEnabled = roiCheck.checked;
+            renderTracksList();
+            updateOverlay();
+        });
+    }
+
+    // Filter / sort
+    const filterInput = document.getElementById('filterTracks');
+    const sortSelect = document.getElementById('sortTracks');
+    if (filterInput) filterInput.addEventListener('input', renderTracksList);
+    if (sortSelect) sortSelect.addEventListener('change', renderTracksList);
 }
 
 function setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
-        // Don't trigger if typing in input
+    document.addEventListener('keydown', e => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-        
-        switch(e.key.toLowerCase()) {
-            case 'd':
-                if (selectedTrackId) deleteSelectedTrack();
-                break;
-            case 'c':
-                if (selectedTrackId) changeTrackClass();
-                break;
-            case 's':
-                if (selectedTrackId) splitSelectedTrack();
-                break;
-            case 'm':
-                if (selectedTrackId) mergeSelectedTrack();
-                break;
+
+        // Ctrl+S to save
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            saveAnnotations();
+            return;
+        }
+
+        switch (e.key.toLowerCase()) {
+            case 'd': if (selectedTrackId) deleteSelectedTrack(); break;
+            case 'c': if (selectedTrackId) changeTrackClass(); break;
+            case 's': if (selectedTrackId) splitSelectedTrack(); break;
+            case 'm': if (selectedTrackId) mergeSelectedTrack(); break;
             case ' ':
                 e.preventDefault();
-                if (video && video.readyState) {
-                    if (video.paused) video.play();
-                    else video.pause();
-                }
+                isPlaying ? pauseVideo() : playVideo();
                 break;
             case 'arrowleft':
                 e.preventDefault();
-                if (video && video.readyState) {
-                    const fps = tracksData?.fps || 30;
-                    video.currentTime = Math.max(0, (video.currentTime || 0) - 1/fps);
-                }
+                pauseVideo();
+                loadFrame(currentFrame - 1);
                 break;
             case 'arrowright':
                 e.preventDefault();
-                if (video && video.readyState) {
-                    const fps2 = tracksData?.fps || 30;
-                    video.currentTime = Math.min(video.duration || 0, (video.currentTime || 0) + 1/fps2);
-                }
+                pauseVideo();
+                loadFrame(currentFrame + 1);
                 break;
         }
     });
 }
 
+// ---------------------------------------------------------------
+// Track list rendering
+// ---------------------------------------------------------------
 function renderTracksList() {
     const container = document.getElementById('tracksList');
-    const tracks = tracksData?.tracks || [];
-    
+    let tracks = getFilteredTracks();
+
     if (tracks.length === 0) {
         container.innerHTML = '<p class="loading">No tracks found</p>';
         return;
     }
-    
-    const filterText = document.getElementById('filterTracks')?.value.toLowerCase() || '';
+
+    const filterText = (document.getElementById('filterTracks')?.value || '').toLowerCase();
     const sortBy = document.getElementById('sortTracks')?.value || 'id';
-    
-    // Filter and sort
-    let filtered = tracks.filter(track => {
-        const trackId = String(track.track_id || '');
-        const className = (track.class || '').toLowerCase();
-        return trackId.includes(filterText) || className.includes(filterText);
+
+    let filtered = tracks.filter(t => {
+        const tid = String(t.track_id || '');
+        const cls = (t.class || '').toLowerCase();
+        return tid.includes(filterText) || cls.includes(filterText);
     });
-    
+
     filtered.sort((a, b) => {
-        switch(sortBy) {
-            case 'id':
-                return (a.track_id || 0) - (b.track_id || 0);
-            case 'class':
-                return (a.class || '').localeCompare(b.class || '');
+        switch (sortBy) {
+            case 'id': return (a.track_id || 0) - (b.track_id || 0);
+            case 'class': return (a.class || '').localeCompare(b.class || '');
             case 'confidence':
-                const aConf = a.frames?.[0]?.conf || 0;
-                const bConf = b.frames?.[0]?.conf || 0;
-                return bConf - aConf;
-            case 'length':
-                return (b.frames?.length || 0) - (a.frames?.length || 0);
-            default:
-                return 0;
+                return (b.avg_confidence || b.frames?.[0]?.conf || 0) - (a.avg_confidence || a.frames?.[0]?.conf || 0);
+            case 'length': return (b.frames?.length || 0) - (a.frames?.length || 0);
+            default: return 0;
         }
     });
-    
+
     container.innerHTML = filtered.map(track => {
         const frames = track.frames || [];
-        const avgConf = frames.length > 0 
-            ? (frames.reduce((sum, f) => sum + (f.conf || 0), 0) / frames.length).toFixed(2)
+        const avgConf = frames.length > 0
+            ? (frames.reduce((s, f) => s + (f.conf || 0), 0) / frames.length).toFixed(2)
             : '0.00';
-        
         return `
-            <div class="track-item ${selectedTrackId === track.track_id ? 'selected' : ''}" 
+            <div class="track-item ${selectedTrackId === track.track_id ? 'selected' : ''}"
                  data-track-id="${track.track_id}"
                  onclick="selectTrack(${track.track_id})">
                 <div class="track-item-header">
-                    <span class="track-id">Track #${track.track_id}</span>
+                    <span class="track-id">#${track.track_id}</span>
                     <span class="track-class">${track.class || 'unknown'}</span>
                 </div>
                 <div class="track-info">
-                    Frames: ${frames.length} | 
-                    Confidence: ${avgConf} | 
-                    Range: ${track.start_frame || 0} - ${track.end_frame || 0}
+                    Frames: ${frames.length} | Conf: ${avgConf} | ${track.start_frame || 0}-${track.end_frame || 0}
+                    ${track.needs_review ? ' | <span style="color:#ffc107">Review</span>' : ''}
                 </div>
-            </div>
-        `;
+            </div>`;
     }).join('');
 }
 
-// Make selectTrack globally accessible for onclick handlers
 window.selectTrack = function(trackId) {
     selectedTrackId = trackId;
+
+    // Jump to track's first frame if not in range
+    const track = tracksData?.tracks?.find(t => t.track_id === trackId);
+    if (track) {
+        const hasFrameNow = track.frames?.some(f => f.frame === currentFrame);
+        if (!hasFrameNow && track.start_frame !== undefined) {
+            loadFrame(track.start_frame);
+        }
+    }
+
     renderTracksList();
     updateSelectedTrackInfo();
     updateActionButtons();
@@ -260,200 +612,114 @@ window.selectTrack = function(trackId) {
 function updateSelectedTrackInfo() {
     const info = document.getElementById('selectedTrackInfo');
     if (!selectedTrackId || !tracksData) {
-        info.innerHTML = '<p>No track selected. Click a track in the list to select it.</p>';
+        info.innerHTML = '<p>No track selected. Click a track to select it.</p>';
         return;
     }
-    
     const track = tracksData.tracks.find(t => t.track_id === selectedTrackId);
-    if (!track) {
-        info.innerHTML = '<p>Track not found</p>';
-        return;
-    }
-    
+    if (!track) { info.innerHTML = '<p>Track not found</p>'; return; }
     const frames = track.frames || [];
     info.innerHTML = `
-        <p><strong>Track #${track.track_id}</strong></p>
-        <p>Class: ${track.class || 'unknown'}</p>
-        <p>Frames: ${frames.length}</p>
-        <p>Frame range: ${track.start_frame || 0} - ${track.end_frame || 0}</p>
-        <p>Lane: ${track.lane_id || 'N/A'}</p>
+        <p><strong>Track #${track.track_id}</strong> &mdash; ${track.class || 'unknown'}</p>
+        <p>Frames: ${frames.length} | Range: ${track.start_frame || 0} - ${track.end_frame || 0}</p>
+        <p>Avg Confidence: ${track.avg_confidence || 'N/A'}</p>
     `;
 }
 
 function updateActionButtons() {
-    const hasSelection = selectedTrackId !== null;
-    document.getElementById('deleteTrack').disabled = !hasSelection;
-    document.getElementById('changeClass').disabled = !hasSelection;
-    document.getElementById('splitTrack').disabled = !hasSelection;
-    document.getElementById('mergeTrack').disabled = !hasSelection;
+    const has = selectedTrackId !== null;
+    document.getElementById('deleteTrack').disabled = !has;
+    document.getElementById('changeClass').disabled = !has;
+    document.getElementById('splitTrack').disabled = !has;
+    document.getElementById('mergeTrack').disabled = !has;
 }
 
 function updateFrameInfo() {
-    if (!video || !video.readyState) return;
-    
-    const fps = tracksData?.fps || 30;
-    const totalFrames = Math.floor((video.duration || 0) * fps);
-    const currentFrameEl = document.getElementById('currentFrame');
-    const totalFramesEl = document.getElementById('totalFrames');
-    const currentTimeEl = document.getElementById('currentTime');
-    
-    if (currentFrameEl) currentFrameEl.textContent = currentFrame;
-    if (totalFramesEl) totalFramesEl.textContent = totalFrames;
-    
-    if (currentTimeEl) {
-        const minutes = Math.floor((video.currentTime || 0) / 60);
-        const seconds = Math.floor((video.currentTime || 0) % 60);
-        currentTimeEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
+    document.getElementById('currentFrame').textContent = currentFrame;
+    const scrubber = document.getElementById('frameScrubber');
+    if (scrubber) scrubber.value = currentFrame;
+
+    const secs = videoFps > 0 ? currentFrame / videoFps : 0;
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    document.getElementById('currentTime').textContent = `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function updateOverlay() {
-    if (!ctx || !tracksData || !canvas || !video || !video.readyState) return;
-    
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    const tracks = tracksData.tracks || [];
-    const fps = tracksData.fps || 30;
-    const frame = Math.floor((video.currentTime || 0) * fps);
-    
-    // Draw bboxes for current frame
-    tracks.forEach(track => {
-        const frameData = track.frames?.find(f => f.frame === frame);
-        if (!frameData || !frameData.bbox) return;
-        
-        const [x1, y1, x2, y2] = frameData.bbox;
-        const isSelected = track.track_id === selectedTrackId;
-        
-        // Draw bbox
-        ctx.strokeStyle = isSelected ? '#FFFF00' : (CLASS_COLORS[track.class] || '#FFFFFF');
-        ctx.lineWidth = isSelected ? 3 : 2;
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-        
-        // Draw label
-        ctx.fillStyle = isSelected ? '#FFFF00' : (CLASS_COLORS[track.class] || '#FFFFFF');
-        ctx.font = '14px Arial';
-        ctx.fillText(
-            `#${track.track_id} ${track.class || ''} ${(frameData.conf || 0).toFixed(2)}`,
-            x1,
-            y1 - 5
-        );
-    });
-}
-
+// ---------------------------------------------------------------
+// Track actions
+// ---------------------------------------------------------------
 function deleteSelectedTrack() {
     if (!selectedTrackId) return;
-    
     if (!confirm(`Delete track #${selectedTrackId}?`)) return;
-    
     performAction('delete', selectedTrackId);
 }
 
 function changeTrackClass() {
     if (!selectedTrackId) return;
-    
-    const newClass = prompt('Enter new class:', 'car');
-    if (!newClass) return;
-    
-    performAction('change_class', selectedTrackId, { new_class: newClass });
+    const nc = prompt('Enter new class:', 'car');
+    if (!nc) return;
+    performAction('change_class', selectedTrackId, { new_class: nc });
 }
 
 function splitSelectedTrack() {
     if (!selectedTrackId) return;
-    
-    const frame = parseInt(prompt('Enter frame number to split at:', currentFrame));
+    const frame = parseInt(prompt('Split at frame:', currentFrame));
     if (isNaN(frame)) return;
-    
-    performAction('split', selectedTrackId, { frame: frame });
+    performAction('split', selectedTrackId, { frame });
 }
 
 function mergeSelectedTrack() {
     if (!selectedTrackId) return;
-    
-    const targetId = parseInt(prompt('Enter track ID to merge into:', ''));
-    if (isNaN(targetId)) return;
-    
-    performAction('merge', selectedTrackId, { target_track_id: targetId });
+    const tid = parseInt(prompt('Merge into track ID:', ''));
+    if (isNaN(tid)) return;
+    performAction('merge', selectedTrackId, { target_track_id: tid });
 }
 
 function performAction(action, trackId, data = {}) {
     fetch(`/api/session/${currentSession}/action`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            action: action,
-            track_id: trackId,
-            data: data
-        })
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ action, track_id: trackId, data })
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(result => {
-        if (result.error) {
-            showStatus('Error: ' + result.error, 'error');
-        } else {
-            tracksData = result.tracks || tracksData;
-            selectedTrackId = null;
-            renderTracksList();
-            updateSelectedTrackInfo();
-            updateActionButtons();
-            updateOverlay();
-            showStatus('Action completed successfully', 'success');
-        }
+        if (result.error) { showStatus('Error: ' + result.error, 'error'); return; }
+        tracksData = result.tracks || tracksData;
+        rois = tracksData.rois || [];
+        selectedTrackId = null;
+        renderTracksList();
+        updateSelectedTrackInfo();
+        updateActionButtons();
+        updateOverlay();
+        showStatus('Action completed', 'success');
     })
-    .catch(error => {
-        showStatus('Error: ' + error.message, 'error');
-    });
+    .catch(err => showStatus('Error: ' + err.message, 'error'));
 }
 
+// ---------------------------------------------------------------
+// Save
+// ---------------------------------------------------------------
 function saveAnnotations() {
-    if (!tracksData) {
-        showStatus('No tracks to save', 'error');
-        return;
-    }
-    
+    if (!tracksData) { showStatus('No tracks to save', 'error'); return; }
+
     fetch(`/api/session/${currentSession}/tracks`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(tracksData)
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(result => {
-        if (result.error) {
-            showStatus('Error saving: ' + result.error, 'error');
-        } else {
-            showStatus('Annotations saved successfully!', 'success');
-        }
+        if (result.error) { showStatus('Error saving: ' + result.error, 'error'); return; }
+        showStatus('Annotations saved!', 'success');
     })
-    .catch(error => {
-        showStatus('Error saving: ' + error.message, 'error');
-    });
+    .catch(err => showStatus('Error saving: ' + err.message, 'error'));
 }
 
+// ---------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------
 function showStatus(message, type = 'success') {
-    const statusEl = document.getElementById('statusMessage');
-    statusEl.textContent = message;
-    statusEl.className = `status-message ${type} show`;
-    
-    setTimeout(() => {
-        statusEl.classList.remove('show');
-    }, 3000);
+    const el = document.getElementById('statusMessage');
+    el.textContent = message;
+    el.className = `status-message ${type} show`;
+    setTimeout(() => el.classList.remove('show'), 3000);
 }
-
-// Filter and sort event listeners
-document.addEventListener('DOMContentLoaded', () => {
-    const filterInput = document.getElementById('filterTracks');
-    const sortSelect = document.getElementById('sortTracks');
-    
-    if (filterInput) {
-        filterInput.addEventListener('input', renderTracksList);
-    }
-    
-    if (sortSelect) {
-        sortSelect.addEventListener('change', renderTracksList);
-    }
-});
-
