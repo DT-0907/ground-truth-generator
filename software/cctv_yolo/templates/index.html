@@ -30,6 +30,18 @@
         }
         .mode-badge.local { background: #555; color: #ccc; }
         .mode-badge.nas { background: #3498db; color: #fff; }
+        .settings-gear {
+            margin-left: auto;
+            padding: 8px 12px;
+            background: #2d3a5a;
+            border: none;
+            border-radius: 6px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        .settings-gear:hover { background: #3d4a6a; color: #4ecca3; }
 
         /* Tabs */
         .tabs {
@@ -150,7 +162,7 @@
             flex-wrap: wrap;
             gap: 4px 12px;
         }
-        .video-actions { display: flex; gap: 8px; align-items: center; }
+        .video-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .video-actions .badge { font-size: 10px; }
 
         /* Progress bar */
@@ -167,6 +179,8 @@
             background: #3498db;
             border-radius: 2px;
             transition: width 0.3s;
+        }
+        .progress-bar .fill.pulse {
             animation: pulse 1.5s ease-in-out infinite;
         }
         @keyframes pulse {
@@ -214,12 +228,92 @@
         .toast.show { opacity: 1; }
         .toast.error { background: #e74c3c; color: #fff; }
 
-        /* Settings */
-        .settings-panel { max-width: 560px; }
-        .settings-panel h2 { font-size: 18px; margin-bottom: 16px; color: #ccc; }
+        /* Correction filter bar */
+        .correction-filters {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+        .filter-pill {
+            padding: 6px 14px;
+            border: 1px solid #2d3a5a;
+            border-radius: 20px;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .filter-pill:hover { border-color: #4ecca3; color: #ccc; }
+        .filter-pill.active { border-color: #4ecca3; color: #4ecca3; background: rgba(78, 204, 163, 0.1); }
+
+        /* Performance page */
+        .perf-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .perf-controls select {
+            padding: 8px 12px;
+            background: #16213e;
+            border: 1px solid #2d3a5a;
+            color: #fff;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 240px;
+        }
+        .perf-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        .perf-table th, .perf-table td {
+            padding: 10px 16px;
+            text-align: left;
+            border-bottom: 1px solid #2d3a5a;
+        }
+        .perf-table th {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            background: #16213e;
+        }
+        .perf-table td { font-size: 14px; }
+        .perf-table tr:hover td { background: #1f2b4d; }
+        .perf-section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .perf-section h3 { color: #aaa; font-size: 14px; margin-bottom: 12px; }
+
+        /* Modal (settings + ROI) */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 30px;
+            width: 560px;
+            max-width: 95vw;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        .modal-box h2 { font-size: 18px; margin-bottom: 20px; color: #ccc; }
         .settings-section {
-            margin-bottom: 32px;
-            padding-bottom: 24px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
             border-bottom: 1px solid #2d3a5a;
         }
         .settings-section:last-child { border-bottom: none; }
@@ -233,7 +327,7 @@
         .form-group input {
             width: 100%;
             padding: 10px 12px;
-            background: #16213e;
+            background: #1a1a2e;
             border: 1px solid #2d3a5a;
             color: #fff;
             border-radius: 6px;
@@ -247,7 +341,7 @@
         .form-row .form-group { flex: 1; }
         .settings-actions { display: flex; gap: 10px; margin-top: 20px; }
         .nas-status-box {
-            background: #16213e;
+            background: #1a1a2e;
             border-radius: 8px;
             padding: 16px 20px;
             margin-bottom: 20px;
@@ -260,8 +354,6 @@
         .nas-status-dot.disconnected { background: #555; }
         .nas-status-text { font-size: 13px; color: #aaa; }
         .nas-status-text strong { color: #eee; }
-
-        /* Folder buttons */
         .folder-buttons {
             display: flex;
             gap: 10px;
@@ -270,7 +362,7 @@
         }
         .folder-btn {
             padding: 10px 16px;
-            background: #16213e;
+            background: #1a1a2e;
             border: 1px solid #2d3a5a;
             color: #ccc;
             border-radius: 6px;
@@ -290,6 +382,51 @@
             font-family: monospace;
             word-break: break-all;
         }
+        .modal-close {
+            float: right;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        .modal-close:hover { color: #fff; }
+
+        /* ROI modal */
+        .roi-modal-box {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            width: 90vw;
+            max-width: 900px;
+            max-height: 85vh;
+        }
+        .roi-modal-box h3 { margin-bottom: 12px; color: #ccc; font-size: 16px; }
+        .roi-canvas-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .roi-canvas-container img {
+            max-width: 100%;
+            display: block;
+        }
+        .roi-canvas-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+        }
+        .roi-modal-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .roi-modal-actions .btn { padding: 8px 16px; font-size: 13px; }
+        .roi-modal-info { font-size: 12px; color: #888; margin-left: 12px; }
     </style>
 </head>
 <body>
@@ -297,66 +434,17 @@
         <div class="header">
             <h1>CCTV-YOLO</h1>
             <span class="mode-badge local" id="modeBadge">Local</span>
+            <button class="settings-gear" onclick="openSettings()" title="Settings">&#9881;</button>
         </div>
 
         <div class="tabs">
-            <div class="tab active" data-tab="sessions">Sessions</div>
-            <div class="tab" data-tab="videos">Videos</div>
-            <div class="tab" data-tab="settings">Settings</div>
+            <div class="tab active" data-tab="preprocessing">Preprocessing</div>
+            <div class="tab" data-tab="correction">Correction</div>
+            <div class="tab" data-tab="performance">Performance</div>
         </div>
 
-        <!-- SESSIONS TAB -->
-        <div class="tab-content active" id="tab-sessions">
-            <div class="stats">
-                <div class="stat-card">
-                    <h3>Total Sessions</h3>
-                    <div class="value">{{ sessions|length }}</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Need Review</h3>
-                    <div class="value">{{ sessions|selectattr('needs_review')|list|length }}</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Corrected</h3>
-                    <div class="value">{{ sessions|selectattr('has_corrections')|list|length }}</div>
-                </div>
-            </div>
-
-            {% if sessions %}
-            <div class="sessions-list">
-                {% for session in sessions %}
-                <div class="session-card">
-                    <div class="session-info">
-                        <h3>{{ session.video_name or session.id }}</h3>
-                        <div class="session-meta">
-                            <span>{{ session.track_count }} tracks</span>
-                            {% if session.needs_review > 0 %}
-                            <span class="badge badge-review">{{ session.needs_review }} need review</span>
-                            {% endif %}
-                            {% if session.has_corrections %}
-                            <span class="badge badge-done">Corrected</span>
-                            {% endif %}
-                            {% if not session.video_exists %}
-                            <span class="badge badge-missing">Video missing</span>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <a href="/review/{{ session.id }}" class="btn btn-primary" {% if not session.video_exists %}disabled{% endif %}>
-                        Review
-                    </a>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="empty-state">
-                <h2>No sessions yet</h2>
-                <p>Go to the Videos tab to process your first video, or add videos to the Videos folder.</p>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- VIDEOS TAB -->
-        <div class="tab-content" id="tab-videos">
+        <!-- PREPROCESSING TAB -->
+        <div class="tab-content active" id="tab-preprocessing">
             <div class="stats" id="videoStats">
                 <div class="stat-card">
                     <h3>Total Videos</h3>
@@ -375,9 +463,7 @@
             <div class="process-options">
                 <label>Model:</label>
                 <select id="modelSelect">
-                    <option value="yolov8n.pt">YOLOv8n (fast)</option>
-                    <option value="yolov8s.pt">YOLOv8s (balanced)</option>
-                    <option value="yolov8m.pt" selected>YOLOv8m (accurate)</option>
+                    <option value="yolov8m.pt">Loading...</option>
                 </select>
                 <label>Confidence:</label>
                 <input type="number" id="confInput" value="0.25" min="0.05" max="0.95" step="0.05" style="width:70px;">
@@ -391,102 +477,221 @@
             </div>
         </div>
 
-        <!-- SETTINGS TAB -->
-        <div class="tab-content" id="tab-settings">
-            <div class="settings-panel">
+        <!-- CORRECTION TAB -->
+        <div class="tab-content" id="tab-correction">
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>Total Sessions</h3>
+                    <div class="value" id="corrTotal">{{ sessions|length }}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Need Review</h3>
+                    <div class="value" id="corrNeedReview">{{ sessions|selectattr('needs_review')|list|length }}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Corrected</h3>
+                    <div class="value" id="corrCorrected">{{ sessions|selectattr('has_corrections')|list|length }}</div>
+                </div>
+            </div>
 
-                <!-- Local Folders Section -->
-                <div class="settings-section">
-                    <h2>Local Folders</h2>
-                    <p style="color:#888;font-size:13px;margin-bottom:6px;">
-                        All data is stored in your Documents folder.
-                    </p>
-                    <div class="data-path" id="dataPathDisplay">~/Documents/CCTV-YOLO</div>
+            <div class="correction-filters">
+                <button class="filter-pill active" data-cfilter="all">All</button>
+                <button class="filter-pill" data-cfilter="review">Needs Review</button>
+                <button class="filter-pill" data-cfilter="corrected">Corrected</button>
+            </div>
 
-                    <div class="folder-buttons">
-                        <button class="folder-btn" onclick="openFolder('videos')">
-                            <span class="folder-icon">&#128249;</span>
-                            Videos Folder
-                        </button>
-                        <button class="folder-btn" onclick="openFolder('data')">
-                            <span class="folder-icon">&#128193;</span>
-                            Data Folder
-                        </button>
-                        <button class="folder-btn" onclick="openFolder('exports')">
-                            <span class="folder-icon">&#128230;</span>
-                            Exports Folder
-                        </button>
-                        <button class="folder-btn" onclick="openFolder('tracks')">
-                            <span class="folder-icon">&#128202;</span>
-                            Tracks Folder
-                        </button>
-                        <button class="folder-btn" onclick="openFolder('corrections')">
-                            <span class="folder-icon">&#9998;</span>
-                            Corrections Folder
-                        </button>
+            <div class="sessions-list" id="sessionsList">
+                {% if sessions %}
+                {% for session in sessions %}
+                <div class="session-card" data-needs-review="{{ session.needs_review }}" data-has-corrections="{{ session.has_corrections|lower }}">
+                    <div class="session-info">
+                        <h3>{{ session.video_name or session.id }}</h3>
+                        <div class="session-meta">
+                            <span>{{ session.track_count }} tracks</span>
+                            {% if session.needs_review > 0 %}
+                            <span class="badge badge-review">{{ session.needs_review }} need review</span>
+                            {% endif %}
+                            {% if session.has_corrections %}
+                            <span class="badge badge-done">Corrected</span>
+                            {% endif %}
+                            {% if not session.video_exists %}
+                            <span class="badge badge-missing">Video missing</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <a href="/review/{{ session.id }}" class="btn btn-primary" {% if not session.video_exists %}style="pointer-events:none;opacity:0.5;"{% endif %}>
+                        Review
+                    </a>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="empty-state" id="noSessionsMsg">
+                    <h2>No sessions yet</h2>
+                    <p>Go to the Preprocessing tab to process your first video.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- PERFORMANCE TAB -->
+        <div class="tab-content" id="tab-performance">
+            <div class="perf-controls">
+                <select id="perfSessionSelect" onchange="loadPerformance()">
+                    <option value="">-- Select a session --</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" onclick="exportPerformanceCsv()" id="exportCsvBtn" disabled>Export CSV</button>
+            </div>
+
+            <div id="perfContent" style="display:none;">
+                <div class="stats">
+                    <div class="stat-card">
+                        <h3>Total Vehicles</h3>
+                        <div class="value" id="perfTotal">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Model</h3>
+                        <div class="value" id="perfModel" style="font-size:18px;">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Confidence</h3>
+                        <div class="value" id="perfConf">-</div>
                     </div>
                 </div>
 
-                <!-- NAS Connection Section -->
-                <div class="settings-section">
-                    <h2>NAS Connection (Tailscale SMB)</h2>
-
-                    <div class="nas-status-box" id="nasStatusBox">
-                        <div class="nas-status-dot disconnected" id="nasStatusDot"></div>
-                        <div class="nas-status-text" id="nasStatusText">
-                            <strong>Disconnected</strong> &mdash; Local mode
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Tailscale IP</label>
-                            <input type="text" id="nasIp" placeholder="100.x.x.x">
-                        </div>
-                        <div class="form-group">
-                            <label>Share Name</label>
-                            <input type="text" id="nasShare" placeholder="Videos">
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" id="nasUser" placeholder="admin">
-                        </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" id="nasPass" placeholder="password">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Mount Point (optional)</label>
-                        <input type="text" id="nasMountPoint" placeholder="/tmp/cctv_nas_mount">
-                    </div>
-
-                    <div class="settings-actions">
-                        <button class="btn btn-primary" id="nasConnectBtn" onclick="connectNas()">Connect</button>
-                        <button class="btn btn-danger" id="nasDisconnectBtn" onclick="disconnectNas()" style="display:none;">Disconnect</button>
-                    </div>
+                <div class="perf-section">
+                    <h3>By Vehicle Type</h3>
+                    <table class="perf-table" id="perfByType">
+                        <thead><tr><th>Type</th><th>Count</th><th>%</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
 
+                <div class="perf-section" id="perfRoiSection" style="display:none;">
+                    <h3>By Region of Interest</h3>
+                    <table class="perf-table" id="perfByRoi">
+                        <thead><tr><th>ROI</th><th>Count</th><th>Details</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="empty-state" id="perfEmpty">
+                <h2>Select a session</h2>
+                <p>Choose a processed session above to view performance statistics.</p>
             </div>
         </div>
     </div>
 
     <div class="toast" id="toast"></div>
 
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-box">
+            <button class="modal-close" onclick="closeSettings()">&times;</button>
+            <h2>Settings</h2>
+
+            <div class="settings-section">
+                <h3 style="color:#aaa;margin-bottom:10px;font-size:15px;">Local Folders</h3>
+                <p style="color:#888;font-size:13px;margin-bottom:6px;">
+                    All data is stored in your Documents folder.
+                </p>
+                <div class="data-path" id="dataPathDisplay">~/Documents/CCTV-YOLO</div>
+
+                <div class="folder-buttons">
+                    <button class="folder-btn" onclick="openFolder('videos')">
+                        <span class="folder-icon">&#128249;</span>Videos
+                    </button>
+                    <button class="folder-btn" onclick="openFolder('data')">
+                        <span class="folder-icon">&#128193;</span>Data
+                    </button>
+                    <button class="folder-btn" onclick="openFolder('exports')">
+                        <span class="folder-icon">&#128230;</span>Exports
+                    </button>
+                    <button class="folder-btn" onclick="openFolder('tracks')">
+                        <span class="folder-icon">&#128202;</span>Tracks
+                    </button>
+                    <button class="folder-btn" onclick="openFolder('corrections')">
+                        <span class="folder-icon">&#9998;</span>Corrections
+                    </button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 style="color:#aaa;margin-bottom:10px;font-size:15px;">NAS Connection (Tailscale SMB)</h3>
+
+                <div class="nas-status-box" id="nasStatusBox">
+                    <div class="nas-status-dot disconnected" id="nasStatusDot"></div>
+                    <div class="nas-status-text" id="nasStatusText">
+                        <strong>Disconnected</strong> &mdash; Local mode
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Tailscale IP</label>
+                        <input type="text" id="nasIp" placeholder="100.x.x.x">
+                    </div>
+                    <div class="form-group">
+                        <label>Share Name</label>
+                        <input type="text" id="nasShare" placeholder="Videos">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="nasUser" placeholder="admin">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="nasPass" placeholder="password">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Mount Point (optional)</label>
+                    <input type="text" id="nasMountPoint" placeholder="/tmp/cctv_nas_mount">
+                </div>
+
+                <div class="settings-actions">
+                    <button class="btn btn-primary" id="nasConnectBtn" onclick="connectNas()">Connect</button>
+                    <button class="btn btn-danger" id="nasDisconnectBtn" onclick="disconnectNas()" style="display:none;">Disconnect</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ROI Modal (for processing) -->
+    <div class="modal-overlay" id="roiModal">
+        <div class="roi-modal-box">
+            <h3>Draw Processing ROI (optional)</h3>
+            <p style="font-size:12px;color:#888;margin-bottom:10px;">
+                Draw a rectangle on the frame to limit detection to that area. Leave empty to process the full frame.
+            </p>
+            <div class="roi-canvas-container" id="roiCanvasContainer">
+                <img id="roiFrameImg">
+                <canvas id="roiCanvas"></canvas>
+            </div>
+            <div class="roi-modal-actions">
+                <button class="btn btn-primary" onclick="confirmRoiAndProcess()">Process</button>
+                <button class="btn btn-secondary" onclick="clearProcessingRoi()">Clear ROI</button>
+                <button class="btn btn-secondary" onclick="closeRoiModal()">Cancel</button>
+                <span class="roi-modal-info" id="roiModalInfo">Click and drag to draw a rectangle</span>
+            </div>
+        </div>
+    </div>
+
     <script>
-        // Tab switching
+        // ===== Tab switching =====
         document.querySelectorAll('.tab').forEach(tab => {
             tab.onclick = () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                 tab.classList.add('active');
                 document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-                if (tab.dataset.tab === 'videos') loadVideos();
-                if (tab.dataset.tab === 'settings') { checkNasStatus(); loadAppInfo(); }
+                if (tab.dataset.tab === 'preprocessing') loadVideos();
+                if (tab.dataset.tab === 'correction') loadSessions();
+                if (tab.dataset.tab === 'performance') loadPerfSessions();
             };
         });
 
@@ -497,7 +702,7 @@
             setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
-        // --- Mode indicator ---
+        // ===== Mode indicator =====
         function updateModeIndicator(mode, ip) {
             const badge = document.getElementById('modeBadge');
             if (mode === 'nas') {
@@ -509,7 +714,19 @@
             }
         }
 
-        // --- App info (data path display) ---
+        // ===== Settings Modal =====
+        function openSettings() {
+            document.getElementById('settingsModal').classList.add('show');
+            checkNasStatus();
+            loadAppInfo();
+        }
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('show');
+        }
+        document.getElementById('settingsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeSettings();
+        });
+
         async function loadAppInfo() {
             try {
                 const res = await fetch('/api/app-info');
@@ -518,7 +735,6 @@
             } catch (e) { /* ignore */ }
         }
 
-        // --- Open folder ---
         async function openFolder(type) {
             try {
                 const res = await fetch('/api/open-folder', {
@@ -527,17 +743,12 @@
                     body: JSON.stringify({ folder: type })
                 });
                 const data = await res.json();
-                if (data.success) {
-                    showToast('Opened ' + type + ' folder');
-                } else {
-                    showToast(data.error || 'Failed to open folder', true);
-                }
-            } catch (e) {
-                showToast('Failed to open folder', true);
-            }
+                if (data.success) showToast('Opened ' + type + ' folder');
+                else showToast(data.error || 'Failed to open folder', true);
+            } catch (e) { showToast('Failed to open folder', true); }
         }
 
-        // --- NAS Settings ---
+        // ===== NAS =====
         async function checkNasStatus() {
             try {
                 const [statusRes, configRes] = await Promise.all([
@@ -586,8 +797,7 @@
             }
 
             const btn = document.getElementById('nasConnectBtn');
-            btn.disabled = true;
-            btn.textContent = 'Connecting...';
+            btn.disabled = true; btn.textContent = 'Connecting...';
 
             try {
                 const res = await fetch('/api/nas/connect', {
@@ -596,38 +806,48 @@
                     body: JSON.stringify({ ip, share, username, password, mount_point: mountPoint || undefined })
                 });
                 const data = await res.json();
-
-                if (data.success) {
-                    showToast(data.message);
-                    checkNasStatus();
-                } else {
-                    showToast(data.message || 'Connection failed', true);
-                }
-            } catch (e) {
-                showToast('Network error', true);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Connect';
-            }
+                if (data.success) { showToast(data.message); checkNasStatus(); }
+                else showToast(data.message || 'Connection failed', true);
+            } catch (e) { showToast('Network error', true); }
+            finally { btn.disabled = false; btn.textContent = 'Connect'; }
         }
 
         async function disconnectNas() {
             try {
                 const res = await fetch('/api/nas/disconnect', { method: 'POST' });
                 const data = await res.json();
-                if (data.success) {
-                    showToast('Disconnected from NAS');
-                    checkNasStatus();
-                } else {
-                    showToast('Disconnect failed', true);
-                }
-            } catch (e) {
-                showToast('Network error', true);
-            }
+                if (data.success) { showToast('Disconnected from NAS'); checkNasStatus(); }
+                else showToast('Disconnect failed', true);
+            } catch (e) { showToast('Network error', true); }
         }
 
-        // --- Videos ---
+        // ===== Models =====
+        async function loadModels() {
+            try {
+                const res = await fetch('/api/models');
+                const data = await res.json();
+                const select = document.getElementById('modelSelect');
+                select.innerHTML = '';
+                for (const m of data.models) {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    const labels = {
+                        'yolov8n.pt': 'YOLOv8n (fast)',
+                        'yolov8s.pt': 'YOLOv8s (balanced)',
+                        'yolov8m.pt': 'YOLOv8m (accurate)',
+                        'yolov8l.pt': 'YOLOv8l (large)',
+                        'yolov8x.pt': 'YOLOv8x (extra)',
+                    };
+                    opt.textContent = labels[m] || m;
+                    if (m === 'yolov8m.pt') opt.selected = true;
+                    select.appendChild(opt);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // ===== Videos (Preprocessing) =====
         let pollingIntervals = {};
+        let exportPollingIntervals = {};
 
         async function loadVideos() {
             try {
@@ -635,9 +855,7 @@
                 const videos = await res.json();
                 renderVideoGrid(videos);
                 updateVideoStats(videos);
-            } catch (e) {
-                showToast('Failed to load videos', true);
-            }
+            } catch (e) { showToast('Failed to load videos', true); }
         }
 
         function updateVideoStats(videos) {
@@ -670,7 +888,7 @@
                 const statusBadge = getStatusBadge(v);
                 const actionBtn = getActionButton(v);
                 const progressBar = v.status === 'processing'
-                    ? `<div class="progress-bar"><div class="fill" style="width:100%"></div></div>` : '';
+                    ? `<div class="progress-bar"><div class="fill pulse" id="pb-${v.session_id}" style="width:${v.progress || 0}%"></div></div>` : '';
                 const folderLine = v.folder ? `<div class="video-folder">${v.folder}</div>` : '';
 
                 return `
@@ -724,24 +942,151 @@
                     const exportLabel = (v.export_status === 'exported' && v.export_count > 0) ? 'Re-export' : 'Export';
                     btns += ` <button class="btn btn-sm btn-export" onclick="exportVideo('${sid}')">${exportLabel}</button>`;
                 }
-                btns += ` <button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Reprocess</button>`;
+                btns += ` <button class="btn btn-sm btn-process" onclick="showRoiModal('${sid}')">Reprocess</button>`;
                 return btns;
             }
             if (v.status === 'error') {
-                return `<button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Retry</button>`;
+                return `<button class="btn btn-sm btn-process" onclick="showRoiModal('${sid}')">Retry</button>`;
             }
-            return `<button class="btn btn-sm btn-process" onclick="processVideo('${sid}')">Process</button>`;
+            return `<button class="btn btn-sm btn-process" onclick="showRoiModal('${sid}')">Process</button>`;
         }
 
-        async function processVideo(sessionId) {
+        // ===== ROI Modal for Processing =====
+        let _roiModalSessionId = null;
+        let _roiRect = null;  // {x1,y1,x2,y2} in image coords or null
+        let _roiDrawing = false;
+        let _roiStart = null;
+        let _roiImgW = 0;
+        let _roiImgH = 0;
+
+        function showRoiModal(sessionId) {
+            _roiModalSessionId = sessionId;
+            _roiRect = null;
+            _roiDrawing = false;
+            _roiStart = null;
+
+            const modal = document.getElementById('roiModal');
+            const img = document.getElementById('roiFrameImg');
+            const roiCanvas = document.getElementById('roiCanvas');
+
+            img.onload = function() {
+                _roiImgW = img.naturalWidth;
+                _roiImgH = img.naturalHeight;
+                roiCanvas.width = img.clientWidth;
+                roiCanvas.height = img.clientHeight;
+                roiCanvas.style.width = img.clientWidth + 'px';
+                roiCanvas.style.height = img.clientHeight + 'px';
+                drawRoiOverlay();
+            };
+            img.src = `/api/videos/thumbnail/${encodeURIComponent(sessionId)}`;
+            modal.classList.add('show');
+            document.getElementById('roiModalInfo').textContent = 'Click and drag to draw a rectangle (optional)';
+        }
+
+        function closeRoiModal() {
+            document.getElementById('roiModal').classList.remove('show');
+            _roiModalSessionId = null;
+            _roiRect = null;
+        }
+
+        function clearProcessingRoi() {
+            _roiRect = null;
+            drawRoiOverlay();
+            document.getElementById('roiModalInfo').textContent = 'ROI cleared - will process full frame';
+        }
+
+        function confirmRoiAndProcess() {
+            const sessionId = _roiModalSessionId;
+            let processingRoi = null;
+
+            if (_roiRect) {
+                const roiCanvas = document.getElementById('roiCanvas');
+                const img = document.getElementById('roiFrameImg');
+                const scaleX = _roiImgW / img.clientWidth;
+                const scaleY = _roiImgH / img.clientHeight;
+                const x1 = Math.round(_roiRect.x1 * scaleX);
+                const y1 = Math.round(_roiRect.y1 * scaleY);
+                const x2 = Math.round(_roiRect.x2 * scaleX);
+                const y2 = Math.round(_roiRect.y2 * scaleY);
+                processingRoi = {
+                    type: 'rect',
+                    points: [{x: x1, y: y1}, {x: x2, y: y2}]
+                };
+            }
+
+            closeRoiModal();
+            processVideo(sessionId, processingRoi);
+        }
+
+        // ROI canvas event handlers
+        (function() {
+            const roiCanvas = document.getElementById('roiCanvas');
+            roiCanvas.addEventListener('mousedown', function(e) {
+                const rect = roiCanvas.getBoundingClientRect();
+                _roiStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                _roiDrawing = true;
+                _roiRect = null;
+            });
+            roiCanvas.addEventListener('mousemove', function(e) {
+                if (!_roiDrawing || !_roiStart) return;
+                const rect = roiCanvas.getBoundingClientRect();
+                const cx = e.clientX - rect.left;
+                const cy = e.clientY - rect.top;
+                _roiRect = {
+                    x1: Math.min(_roiStart.x, cx),
+                    y1: Math.min(_roiStart.y, cy),
+                    x2: Math.max(_roiStart.x, cx),
+                    y2: Math.max(_roiStart.y, cy),
+                };
+                drawRoiOverlay();
+            });
+            roiCanvas.addEventListener('mouseup', function(e) {
+                _roiDrawing = false;
+                if (_roiRect) {
+                    const w = _roiRect.x2 - _roiRect.x1;
+                    const h = _roiRect.y2 - _roiRect.y1;
+                    if (w < 10 || h < 10) {
+                        _roiRect = null;
+                        drawRoiOverlay();
+                    } else {
+                        document.getElementById('roiModalInfo').textContent = 'ROI set - only detections inside will be kept';
+                    }
+                }
+            });
+        })();
+
+        function drawRoiOverlay() {
+            const roiCanvas = document.getElementById('roiCanvas');
+            const ctx = roiCanvas.getContext('2d');
+            ctx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+            if (_roiRect) {
+                const r = _roiRect;
+                // Dim outside
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, roiCanvas.width, roiCanvas.height);
+                ctx.clearRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+                // Border
+                ctx.strokeStyle = '#4ecca3';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 3]);
+                ctx.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+                ctx.setLineDash([]);
+            }
+        }
+
+        // ===== Process Video =====
+        async function processVideo(sessionId, processingRoi) {
             const model = document.getElementById('modelSelect').value;
             const conf = parseFloat(document.getElementById('confInput').value) || 0.25;
 
             try {
+                const body = { session_id: sessionId, model, conf };
+                if (processingRoi) body.processing_roi = processingRoi;
+
                 const res = await fetch('/api/videos/process', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ session_id: sessionId, model, conf })
+                    body: JSON.stringify(body)
                 });
                 const data = await res.json();
 
@@ -756,7 +1101,7 @@
                         if (!card.querySelector('.progress-bar')) {
                             const pb = document.createElement('div');
                             pb.className = 'progress-bar';
-                            pb.innerHTML = '<div class="fill" style="width:100%"></div>';
+                            pb.innerHTML = `<div class="fill pulse" id="pb-${sessionId}" style="width:0%"></div>`;
                             body.appendChild(pb);
                         }
                     }
@@ -764,9 +1109,7 @@
                 } else {
                     showToast(data.error || 'Failed to start processing', true);
                 }
-            } catch (e) {
-                showToast('Network error', true);
-            }
+            } catch (e) { showToast('Network error', true); }
         }
 
         function startPolling(sessionId) {
@@ -775,6 +1118,11 @@
                 try {
                     const res = await fetch(`/api/videos/status/${encodeURIComponent(sessionId)}`);
                     const status = await res.json();
+                    // Update progress bar
+                    const pb = document.getElementById(`pb-${sessionId}`);
+                    if (pb && status.progress !== undefined) {
+                        pb.style.width = status.progress + '%';
+                    }
                     if (status.status === 'done') {
                         clearInterval(pollingIntervals[sessionId]);
                         delete pollingIntervals[sessionId];
@@ -801,15 +1149,11 @@
                 }
                 showToast(`Queuing ${unprocessed.length} videos for processing...`);
                 for (const v of unprocessed) {
-                    await processVideo(v.session_id);
+                    await processVideo(v.session_id, null);
                     await new Promise(r => setTimeout(r, 500));
                 }
-            } catch (e) {
-                showToast('Failed to queue videos', true);
-            }
+            } catch (e) { showToast('Failed to queue videos', true); }
         }
-
-        let exportPollingIntervals = {};
 
         async function exportVideo(sessionId) {
             try {
@@ -826,9 +1170,7 @@
                 } else {
                     showToast(data.error || 'Failed to start export', true);
                 }
-            } catch (e) {
-                showToast('Network error', true);
-            }
+            } catch (e) { showToast('Network error', true); }
         }
 
         function startExportPolling(sessionId) {
@@ -852,14 +1194,135 @@
             }, 2000);
         }
 
-        // Init
+        // ===== Correction Tab =====
+        let _corrFilter = 'all';
+
+        document.querySelectorAll('.filter-pill').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                _corrFilter = btn.dataset.cfilter;
+                applyCorrFilter();
+            };
+        });
+
+        function applyCorrFilter() {
+            const cards = document.querySelectorAll('#sessionsList .session-card');
+            cards.forEach(card => {
+                const hasReview = parseInt(card.dataset.needsReview) > 0;
+                const hasCorrected = card.dataset.hasCorrections === 'true';
+                let show = true;
+                if (_corrFilter === 'review') show = hasReview;
+                else if (_corrFilter === 'corrected') show = hasCorrected;
+                card.style.display = show ? '' : 'none';
+            });
+        }
+
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/sessions');
+                const sessions = await res.json();
+                document.getElementById('corrTotal').textContent = sessions.length;
+                document.getElementById('corrNeedReview').textContent = sessions.filter(s => s.needs_review > 0).length;
+                document.getElementById('corrCorrected').textContent = sessions.filter(s => s.has_corrections).length;
+            } catch (e) { /* ignore */ }
+        }
+
+        // ===== Performance Tab =====
+        async function loadPerfSessions() {
+            try {
+                const res = await fetch('/api/sessions');
+                const sessions = await res.json();
+                const select = document.getElementById('perfSessionSelect');
+                const currentVal = select.value;
+                select.innerHTML = '<option value="">-- Select a session --</option>';
+                for (const s of sessions) {
+                    const opt = document.createElement('option');
+                    opt.value = s.id;
+                    opt.textContent = `${s.video_name || s.id} (${s.track_count} tracks)`;
+                    select.appendChild(opt);
+                }
+                if (currentVal) select.value = currentVal;
+            } catch (e) { /* ignore */ }
+        }
+
+        async function loadPerformance() {
+            const sessionId = document.getElementById('perfSessionSelect').value;
+            const content = document.getElementById('perfContent');
+            const empty = document.getElementById('perfEmpty');
+            const csvBtn = document.getElementById('exportCsvBtn');
+
+            if (!sessionId) {
+                content.style.display = 'none';
+                empty.style.display = '';
+                csvBtn.disabled = true;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/performance/${encodeURIComponent(sessionId)}`);
+                if (!res.ok) {
+                    showToast('Failed to load performance data', true);
+                    return;
+                }
+                const data = await res.json();
+
+                empty.style.display = 'none';
+                content.style.display = '';
+                csvBtn.disabled = false;
+
+                document.getElementById('perfTotal').textContent = data.total;
+                document.getElementById('perfModel').textContent = data.model || '-';
+                document.getElementById('perfConf').textContent = data.conf_threshold || '-';
+
+                // By type table
+                const tbody = document.querySelector('#perfByType tbody');
+                tbody.innerHTML = '';
+                const sortedTypes = Object.entries(data.by_type).sort((a, b) => b[1] - a[1]);
+                for (const [cls, count] of sortedTypes) {
+                    const pct = data.total > 0 ? (count / data.total * 100).toFixed(1) : 0;
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td style="text-transform:capitalize;">${cls}</td><td>${count}</td><td>${pct}%</td>`;
+                    tbody.appendChild(row);
+                }
+
+                // ROI section
+                const roiSection = document.getElementById('perfRoiSection');
+                const roiTbody = document.querySelector('#perfByRoi tbody');
+                roiTbody.innerHTML = '';
+                if (data.roi_counts && data.roi_counts.length > 0) {
+                    roiSection.style.display = '';
+                    for (const rc of data.roi_counts) {
+                        const details = Object.entries(rc.by_class || {}).map(([c, n]) => `${c}: ${n}`).join(', ');
+                        const row = document.createElement('tr');
+                        row.innerHTML = `<td>${rc.name}</td><td>${rc.count}</td><td style="font-size:12px;color:#aaa;">${details}</td>`;
+                        roiTbody.appendChild(row);
+                    }
+                } else {
+                    roiSection.style.display = 'none';
+                }
+            } catch (e) {
+                showToast('Error loading performance', true);
+            }
+        }
+
+        function exportPerformanceCsv() {
+            const sessionId = document.getElementById('perfSessionSelect').value;
+            if (!sessionId) return;
+            window.open(`/api/performance/${encodeURIComponent(sessionId)}/csv`, '_blank');
+        }
+
+        // ===== Init =====
         checkNasStatus();
         loadAppInfo();
+        loadModels();
+        loadVideos();
 
-        if (window.location.hash === '#videos') {
-            document.querySelector('[data-tab="videos"]').click();
-        } else if (window.location.hash === '#settings') {
-            document.querySelector('[data-tab="settings"]').click();
+        // Handle hash navigation
+        if (window.location.hash === '#correction') {
+            document.querySelector('[data-tab="correction"]').click();
+        } else if (window.location.hash === '#performance') {
+            document.querySelector('[data-tab="performance"]').click();
         }
     </script>
 </body>

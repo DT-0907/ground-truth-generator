@@ -4,6 +4,8 @@ Flask web application for video track correction — standalone desktop version.
 Data is stored in ~/Documents/CCTV-YOLO/ so it persists across app updates.
 """
 
+import csv
+import io
 import json
 import os
 import re
@@ -43,8 +45,9 @@ VIDEOS_DIR = DATA_DIR / "videos"
 TRACKS_DIR = DATA_DIR / "tracks"
 CORRECTIONS_DIR = DATA_DIR / "corrections"
 EXPORTS_DIR = DATA_DIR / "exports"
+MODELS_DIR = _DATA_ROOT / "models"
 
-for _d in [VIDEOS_DIR, TRACKS_DIR, CORRECTIONS_DIR, EXPORTS_DIR]:
+for _d in [VIDEOS_DIR, TRACKS_DIR, CORRECTIONS_DIR, EXPORTS_DIR, MODELS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 NAS_CONFIG_FILE = _DATA_ROOT / "config" / "nas.json"
@@ -564,6 +567,7 @@ def api_process_video():
 
     model = request.json.get("model", "yolov8m.pt")
     conf = request.json.get("conf", 0.25)
+    processing_roi = request.json.get("processing_roi", None)
 
     with processing_lock:
         if session_id_lookup in processing_jobs and processing_jobs[session_id_lookup]["status"] == "processing":
@@ -576,6 +580,11 @@ def api_process_video():
         }
 
     def run_processing():
+        def _progress(pct):
+            with processing_lock:
+                if session_id_lookup in processing_jobs:
+                    processing_jobs[session_id_lookup]["progress"] = pct
+
         try:
             from cctv_yolo.processor import process_video
             process_video(
@@ -584,6 +593,9 @@ def api_process_video():
                 model,
                 conf,
                 session_id=session_id_lookup,
+                progress_callback=_progress,
+                models_dir=str(MODELS_DIR),
+                processing_roi=processing_roi,
             )
             with processing_lock:
                 processing_jobs[session_id_lookup]["status"] = "done"
@@ -796,6 +808,168 @@ def api_export_status(session_id):
         if count > 0:
             return jsonify({"status": "done", "progress": 100, "error": None, "count": count})
     return jsonify({"status": "none", "progress": 0, "error": None})
+
+
+# ---------------------------------------------------------------------------
+# API — models
+# ---------------------------------------------------------------------------
+
+@app.route("/api/models")
+def api_models():
+    """List available .pt model files."""
+    local_models = sorted([f.name for f in MODELS_DIR.glob("*.pt")])
+    builtins = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"]
+    all_models = list(dict.fromkeys(builtins + local_models))  # dedup preserving order
+    return jsonify({"models": all_models})
+
+
+# ---------------------------------------------------------------------------
+# API — performance
+# ---------------------------------------------------------------------------
+
+def _point_in_polygon_js(px, py, polygon):
+    """Ray-casting point-in-polygon test (JS-style point dicts)."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]["x"], polygon[i]["y"]
+        xj, yj = polygon[j]["x"], polygon[j]["y"]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _track_in_roi(track, roi):
+    """Check if any frame of a track has its bbox center inside the ROI."""
+    for fd in track.get("frames", []):
+        bbox = fd.get("bbox", [0, 0, 0, 0])
+        cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+        if roi.get("type") == "rect":
+            pts = roi["points"]
+            x1, y1 = pts[0]["x"], pts[0]["y"]
+            x2, y2 = pts[1]["x"], pts[1]["y"]
+            if min(x1, x2) <= cx <= max(x1, x2) and min(y1, y2) <= cy <= max(y1, y2):
+                return True
+        else:  # polygon
+            if _point_in_polygon_js(cx, cy, roi["points"]):
+                return True
+    return False
+
+
+def _load_session_data(session_id):
+    """Load corrections (preferred) or tracks for a session."""
+    correction_file = CORRECTIONS_DIR / f"{session_id}.json"
+    track_file = TRACKS_DIR / f"{session_id}.json"
+    if correction_file.exists():
+        with open(correction_file, "r") as f:
+            return json.load(f)
+    elif track_file.exists():
+        with open(track_file, "r") as f:
+            return json.load(f)
+    return None
+
+
+@app.route("/api/performance/<session_id>")
+def api_performance(session_id):
+    """Get performance stats for a session."""
+    data = _load_session_data(session_id)
+    if not data:
+        return jsonify({"error": "Session not found"}), 404
+
+    tracks = data.get("tracks", [])
+    rois = data.get("rois", [])
+
+    # Count by vehicle type
+    by_type = {}
+    for t in tracks:
+        cls = t.get("class", "unknown")
+        by_type[cls] = by_type.get(cls, 0) + 1
+
+    # Count by ROI (if ROIs defined)
+    roi_counts = []
+    for roi in rois:
+        count = 0
+        by_class = {}
+        for t in tracks:
+            if _track_in_roi(t, roi):
+                count += 1
+                cls = t.get("class", "unknown")
+                by_class[cls] = by_class.get(cls, 0) + 1
+        roi_counts.append({
+            "name": roi.get("name", ""),
+            "count": count,
+            "by_class": by_class,
+        })
+
+    return jsonify({
+        "total": len(tracks),
+        "by_type": by_type,
+        "roi_counts": roi_counts,
+        "model": data.get("model", ""),
+        "conf_threshold": data.get("conf_threshold", 0),
+        "processed_at": data.get("processed_at", ""),
+    })
+
+
+@app.route("/api/performance/<session_id>/csv")
+def api_performance_csv(session_id):
+    """Export performance stats as CSV."""
+    data = _load_session_data(session_id)
+    if not data:
+        return jsonify({"error": "Session not found"}), 404
+
+    tracks = data.get("tracks", [])
+    rois = data.get("rois", [])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Summary section
+    writer.writerow(["Session", session_id])
+    writer.writerow(["Total Vehicles", len(tracks)])
+    writer.writerow(["Model", data.get("model", "")])
+    writer.writerow(["Confidence Threshold", data.get("conf_threshold", "")])
+    writer.writerow(["Processed At", data.get("processed_at", "")])
+    writer.writerow([])
+
+    # By type
+    writer.writerow(["Vehicle Type", "Count"])
+    by_type = {}
+    for t in tracks:
+        cls = t.get("class", "unknown")
+        by_type[cls] = by_type.get(cls, 0) + 1
+    for cls, count in sorted(by_type.items()):
+        writer.writerow([cls, count])
+    writer.writerow([])
+
+    # By ROI
+    if rois:
+        writer.writerow(["ROI Name", "Total Count"])
+        for roi in rois:
+            count = sum(1 for t in tracks if _track_in_roi(t, roi))
+            writer.writerow([roi.get("name", ""), count])
+        writer.writerow([])
+
+    # Track detail
+    writer.writerow(["Track ID", "Class", "Start Frame", "End Frame", "Frames", "Avg Confidence"])
+    for t in tracks:
+        writer.writerow([
+            t.get("track_id", ""),
+            t.get("class", ""),
+            t.get("start_frame", ""),
+            t.get("end_frame", ""),
+            len(t.get("frames", [])),
+            t.get("avg_confidence", ""),
+        ])
+
+    csv_content = output.getvalue()
+    return Response(
+        csv_content,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={session_id}_performance.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------

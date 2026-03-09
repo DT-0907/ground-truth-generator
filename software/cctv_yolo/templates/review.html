@@ -174,6 +174,7 @@
             display: flex;
             gap: 6px;
             flex-wrap: wrap;
+            align-items: center;
         }
         .filter-btn {
             padding: 4px 8px;
@@ -188,6 +189,16 @@
             border-color: #4ecca3;
             color: #4ecca3;
         }
+        .roi-filter-toggle {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #888;
+            cursor: pointer;
+        }
+        .roi-filter-toggle input { cursor: pointer; }
         .track-list {
             flex: 1;
             overflow-y: auto;
@@ -206,6 +217,7 @@
         .track-item.selected { border-color: #4ecca3; background: #1f3a3a; }
         .track-item.active-frame { background: #2a2a4a; }
         .track-item.needs-review { border-left: 3px solid #f39c12; }
+        .track-item.roi-hidden { opacity: 0.35; }
         .track-header {
             display: flex;
             justify-content: space-between;
@@ -453,6 +465,9 @@
                 <button class="filter-btn" data-filter="car">Car</button>
                 <button class="filter-btn" data-filter="truck">Truck</button>
                 <button class="filter-btn" data-filter="bus">Bus</button>
+                <label class="roi-filter-toggle" title="Only show tracks inside ROIs">
+                    <input type="checkbox" id="roiFilterCheck"> In ROI
+                </label>
             </div>
 
             <div class="track-list" id="trackList"></div>
@@ -479,9 +494,9 @@
             </div>
 
             <div class="shortcuts">
-                <kbd>Space</kbd> Play <kbd>←→</kbd> Frame <kbd>V</kbd> Select <kbd>B</kbd> Draw<br>
+                <kbd>Space</kbd> Play <kbd>&#8592;&#8594;</kbd> Frame <kbd>V</kbd> Select <kbd>B</kbd> Draw<br>
                 <kbd>D</kbd> Delete <kbd>C</kbd> Class <kbd>M</kbd> Merge <kbd>S</kbd> Split<br>
-                <kbd>N</kbd> Copy→Next <kbd>P</kbd> Copy→Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save<br>
+                <kbd>N</kbd> Copy Next <kbd>P</kbd> Copy Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save<br>
                 <kbd>Shift+R</kbd> ROI Rect <kbd>Shift+P</kbd> ROI Poly
             </div>
         </div>
@@ -561,7 +576,7 @@
         let selectedTrackId = null;
         let currentFrame = 0;
         let isPlaying = false;
-        let playInterval = null;
+        let playTimer = null;
         let currentFilter = 'all';
         let hasUnsavedChanges = false;
 
@@ -571,6 +586,13 @@
         let drawStart = null;
         let drawEnd = null;
         let pendingBox = null;
+
+        // Resize state
+        let isResizing = false;
+        let resizeHandle = null;  // 'tl','tc','tr','ml','mr','bl','bc','br'
+        let resizeTrackId = null;
+        let resizeOrigBbox = null;
+        let resizeStartMouse = null;
 
         // ROI state
         let rois = {{ data.rois | tojson }};
@@ -585,10 +607,17 @@
         let pendingRoiType = null;
         const ROI_COLORS = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd'];
 
+        // ROI filter
+        let roiFilterActive = false;
+
         // Undo/Redo
         let undoStack = [];
         let redoStack = [];
         const MAX_UNDO = 50;
+
+        // Frame preload cache
+        const frameCache = new Map();
+        const PRELOAD_AHEAD = 3;
 
         // DOM elements
         const frameImage = document.getElementById('frameImage');
@@ -610,6 +639,9 @@
             bicycle: '#1abc9c',
             unknown: '#95a5a6'
         };
+
+        // Resize handle size
+        const HANDLE_SIZE = 8;
 
         // ===== UNDO/REDO =====
         function saveState() {
@@ -661,8 +693,21 @@
             document.getElementById('unsavedIndicator').classList.remove('show');
         }
 
-        // ===== FRAME LOADING =====
+        // ===== FRAME LOADING WITH PRELOAD =====
         let loadingFrameNum = -1;
+
+        function preloadFrame(frameNum) {
+            if (frameNum < 0 || frameNum >= totalFrames) return;
+            if (frameCache.has(frameNum)) return;
+            const img = new Image();
+            img.src = `/frame/${sessionId}/${frameNum}`;
+            img.onload = () => { frameCache.set(frameNum, img); };
+            // Evict old frames if cache too large
+            if (frameCache.size > 20) {
+                const oldest = frameCache.keys().next().value;
+                frameCache.delete(oldest);
+            }
+        }
 
         function loadFrame(frameNum) {
             frameNum = Math.max(0, Math.min(frameNum, totalFrames - 1));
@@ -673,16 +718,12 @@
             currentFrame = frameNum;
             loadingFrameNum = frameNum;
 
-            loadingText.style.display = 'block';
-            loadingText.textContent = 'Loading frame...';
-
-            const img = new Image();
-            img.onload = function() {
-                if (loadingFrameNum !== frameNum) return; // Stale request
-
+            // Try cache first
+            if (frameCache.has(frameNum)) {
+                const cached = frameCache.get(frameNum);
                 loadingText.style.display = 'none';
                 frameImage.style.display = 'block';
-                frameImage.src = img.src;
+                frameImage.src = cached.src;
 
                 requestAnimationFrame(() => {
                     const rect = frameImage.getBoundingClientRect();
@@ -692,17 +733,69 @@
                     canvas.style.height = rect.height + 'px';
                     drawBoxes();
                 });
-            };
-            img.onerror = function() {
-                if (loadingFrameNum !== frameNum) return;
-                loadingText.textContent = 'Error loading frame';
-            };
-            img.src = `/frame/${sessionId}/${frameNum}`;
+            } else {
+                loadingText.style.display = 'block';
+                loadingText.textContent = 'Loading frame...';
+
+                const img = new Image();
+                img.onload = function() {
+                    if (loadingFrameNum !== frameNum) return; // Stale request
+                    frameCache.set(frameNum, img);
+
+                    loadingText.style.display = 'none';
+                    frameImage.style.display = 'block';
+                    frameImage.src = img.src;
+
+                    requestAnimationFrame(() => {
+                        const rect = frameImage.getBoundingClientRect();
+                        canvas.width = rect.width;
+                        canvas.height = rect.height;
+                        canvas.style.width = rect.width + 'px';
+                        canvas.style.height = rect.height + 'px';
+                        drawBoxes();
+                    });
+                };
+                img.onerror = function() {
+                    if (loadingFrameNum !== frameNum) return;
+                    loadingText.textContent = 'Error loading frame';
+                };
+                img.src = `/frame/${sessionId}/${frameNum}`;
+            }
+
+            // Preload ahead
+            for (let i = 1; i <= PRELOAD_AHEAD; i++) {
+                preloadFrame(frameNum + i);
+            }
 
             slider.value = frameNum;
             frameInput.value = frameNum;
             frameInfo.textContent = `${frameNum} / ${totalFrames}`;
             renderTracks(currentFilter);
+        }
+
+        // ===== COORDINATE HELPERS =====
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        function canvasToVideo(canvasX, canvasY) {
+            const rect = frameImage.getBoundingClientRect();
+            return {
+                x: (canvasX / rect.width) * videoWidth,
+                y: (canvasY / rect.height) * videoHeight
+            };
+        }
+
+        function videoToCanvas(vx, vy) {
+            const rect = frameImage.getBoundingClientRect();
+            return {
+                x: (vx / videoWidth) * rect.width,
+                y: (vy / videoHeight) * rect.height
+            };
         }
 
         // ===== DRAWING =====
@@ -723,22 +816,57 @@
             }
         }
 
-        function getCanvasCoords(e) {
-            const rect = canvas.getBoundingClientRect();
+        // ===== RESIZE HANDLES =====
+        function getResizeHandles(bbox) {
+            // bbox = [x1,y1,x2,y2] in video coords -> return handle rects in canvas coords
+            const p1 = videoToCanvas(bbox[0], bbox[1]);
+            const p2 = videoToCanvas(bbox[2], bbox[3]);
+            const mx = (p1.x + p2.x) / 2;
+            const my = (p1.y + p2.y) / 2;
+            const hs = HANDLE_SIZE;
             return {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
+                tl: { x: p1.x - hs/2, y: p1.y - hs/2 },
+                tc: { x: mx - hs/2, y: p1.y - hs/2 },
+                tr: { x: p2.x - hs/2, y: p1.y - hs/2 },
+                ml: { x: p1.x - hs/2, y: my - hs/2 },
+                mr: { x: p2.x - hs/2, y: my - hs/2 },
+                bl: { x: p1.x - hs/2, y: p2.y - hs/2 },
+                bc: { x: mx - hs/2, y: p2.y - hs/2 },
+                br: { x: p2.x - hs/2, y: p2.y - hs/2 },
             };
         }
 
-        function canvasToVideo(canvasX, canvasY) {
-            const rect = frameImage.getBoundingClientRect();
-            return {
-                x: (canvasX / rect.width) * videoWidth,
-                y: (canvasY / rect.height) * videoHeight
-            };
+        function hitTestHandle(canvasX, canvasY, handles) {
+            const hs = HANDLE_SIZE;
+            for (const [name, pos] of Object.entries(handles)) {
+                if (canvasX >= pos.x && canvasX <= pos.x + hs &&
+                    canvasY >= pos.y && canvasY <= pos.y + hs) {
+                    return name;
+                }
+            }
+            return null;
         }
 
+        function applyResize(origBbox, handle, dx, dy) {
+            // dx, dy are in video coords
+            let [x1, y1, x2, y2] = [...origBbox];
+            switch (handle) {
+                case 'tl': x1 += dx; y1 += dy; break;
+                case 'tc': y1 += dy; break;
+                case 'tr': x2 += dx; y1 += dy; break;
+                case 'ml': x1 += dx; break;
+                case 'mr': x2 += dx; break;
+                case 'bl': x1 += dx; y2 += dy; break;
+                case 'bc': y2 += dy; break;
+                case 'br': x2 += dx; y2 += dy; break;
+            }
+            // Ensure min size
+            if (x2 - x1 < 10) { if (handle.includes('l')) x1 = x2 - 10; else x2 = x1 + 10; }
+            if (y2 - y1 < 10) { if (handle.includes('t')) y1 = y2 - 10; else y2 = y1 + 10; }
+            return [Math.round(x1 * 10) / 10, Math.round(y1 * 10) / 10, Math.round(x2 * 10) / 10, Math.round(y2 * 10) / 10];
+        }
+
+        // ===== CANVAS EVENTS =====
         canvas.addEventListener('mousedown', e => {
             // ROI drawing
             if (isRoiDrawMode) {
@@ -753,10 +881,36 @@
                 }
                 return;
             }
-            if (!isDrawMode) return;
-            isDrawing = true;
-            drawStart = getCanvasCoords(e);
-            drawEnd = drawStart;
+
+            // Draw mode
+            if (isDrawMode) {
+                isDrawing = true;
+                drawStart = getCanvasCoords(e);
+                drawEnd = drawStart;
+                return;
+            }
+
+            // Select mode: check resize handles first
+            if (!isDrawMode && selectedTrackId !== null) {
+                const track = tracks.find(t => t.track_id === selectedTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        const handles = getResizeHandles(fd.bbox);
+                        const coords = getCanvasCoords(e);
+                        const hit = hitTestHandle(coords.x, coords.y, handles);
+                        if (hit) {
+                            isResizing = true;
+                            resizeHandle = hit;
+                            resizeTrackId = selectedTrackId;
+                            resizeOrigBbox = [...fd.bbox];
+                            resizeStartMouse = canvasToVideo(coords.x, coords.y);
+                            canvas.style.pointerEvents = 'auto';
+                            return;
+                        }
+                    }
+                }
+            }
         });
 
         canvas.addEventListener('mousemove', e => {
@@ -767,9 +921,55 @@
                 return;
             }
             if (isRoiDrawMode) return;
-            if (!isDrawMode || !isDrawing) return;
-            drawEnd = getCanvasCoords(e);
-            drawBoxes();
+
+            // Resize
+            if (isResizing) {
+                const coords = getCanvasCoords(e);
+                const videoCoords = canvasToVideo(coords.x, coords.y);
+                const dx = videoCoords.x - resizeStartMouse.x;
+                const dy = videoCoords.y - resizeStartMouse.y;
+                const track = tracks.find(t => t.track_id === resizeTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        fd.bbox = applyResize(resizeOrigBbox, resizeHandle, dx, dy);
+                        drawBoxes();
+                    }
+                }
+                return;
+            }
+
+            // Draw mode
+            if (isDrawMode && isDrawing) {
+                drawEnd = getCanvasCoords(e);
+                drawBoxes();
+                return;
+            }
+
+            // Select mode: update cursor for resize handles
+            if (!isDrawMode && !isRoiDrawMode && selectedTrackId !== null) {
+                const track = tracks.find(t => t.track_id === selectedTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        const handles = getResizeHandles(fd.bbox);
+                        const coords = getCanvasCoords(e);
+                        const hit = hitTestHandle(coords.x, coords.y, handles);
+                        if (hit) {
+                            const cursors = {
+                                tl: 'nwse-resize', tc: 'ns-resize', tr: 'nesw-resize',
+                                ml: 'ew-resize', mr: 'ew-resize',
+                                bl: 'nesw-resize', bc: 'ns-resize', br: 'nwse-resize'
+                            };
+                            canvas.style.cursor = cursors[hit];
+                            canvas.style.pointerEvents = 'auto';
+                            return;
+                        }
+                    }
+                }
+                canvas.style.cursor = '';
+                if (!isDrawMode && !isRoiDrawMode) canvas.style.pointerEvents = 'none';
+            }
         });
 
         canvas.addEventListener('mouseup', e => {
@@ -798,6 +998,22 @@
                 drawBoxes();
                 return;
             }
+
+            // Resize finish
+            if (isResizing) {
+                saveState();
+                isResizing = false;
+                resizeHandle = null;
+                resizeTrackId = null;
+                resizeOrigBbox = null;
+                resizeStartMouse = null;
+                canvas.style.cursor = '';
+                if (!isDrawMode && !isRoiDrawMode) canvas.style.pointerEvents = 'none';
+                drawBoxes();
+                return;
+            }
+
+            // Draw mode finish
             if (!isDrawMode || !isDrawing) return;
             isDrawing = false;
             drawEnd = getCanvasCoords(e);
@@ -855,6 +1071,18 @@
                 roiDrawing = false;
                 roiDrawStart = null;
                 roiDrawEnd = null;
+                drawBoxes();
+            }
+            if (isResizing) {
+                // Cancel resize without saving
+                const track = tracks.find(t => t.track_id === resizeTrackId);
+                if (track && resizeOrigBbox) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) fd.bbox = [...resizeOrigBbox];
+                }
+                isResizing = false;
+                resizeHandle = null;
+                canvas.style.cursor = '';
                 drawBoxes();
             }
         });
@@ -920,7 +1148,6 @@
 
             saveState();
 
-            // Check if target frame already has a box
             const existingIdx = track.frames.findIndex(f => f.frame === targetFrame);
             const newFrameData = {
                 frame: targetFrame,
@@ -996,14 +1223,6 @@
         }
 
         // ===== ROI SYSTEM =====
-        function videoToCanvas(vx, vy) {
-            const rect = frameImage.getBoundingClientRect();
-            return {
-                x: (vx / videoWidth) * rect.width,
-                y: (vy / videoHeight) * rect.height
-            };
-        }
-
         function setRoiDrawMode(type) {
             if (type === false) {
                 isRoiDrawMode = false;
@@ -1083,7 +1302,8 @@
         }
 
         function pointInRect(px, py, p1, p2) {
-            return px >= p1.x && px <= p2.x && py >= p1.y && py <= p2.y;
+            return px >= Math.min(p1.x, p2.x) && px <= Math.max(p1.x, p2.x) &&
+                   py >= Math.min(p1.y, p2.y) && py <= Math.max(p1.y, p2.y);
         }
 
         function pointInPolygon(px, py, polygon) {
@@ -1096,6 +1316,22 @@
                 if (intersect) inside = !inside;
             }
             return inside;
+        }
+
+        function trackInAnyRoi(track) {
+            if (rois.length === 0) return true;
+            for (const roi of rois) {
+                for (const f of track.frames) {
+                    const cx = (f.bbox[0] + f.bbox[2]) / 2;
+                    const cy = (f.bbox[1] + f.bbox[3]) / 2;
+                    if (roi.type === 'rect') {
+                        if (pointInRect(cx, cy, roi.points[0], roi.points[1])) return true;
+                    } else if (roi.type === 'polygon') {
+                        if (pointInPolygon(cx, cy, roi.points)) return true;
+                    }
+                }
+            }
+            return false;
         }
 
         function computeRoiStats(roi) {
@@ -1177,6 +1413,12 @@
                 const color = classColors[track.class] || classColors.unknown;
                 const isSelected = track.track_id === selectedTrackId;
 
+                // ROI filter: dim tracks outside ROIs
+                const outsideRoi = roiFilterActive && rois.length > 0 && !trackInAnyRoi(track);
+                const alpha = outsideRoi ? 0.3 : 1.0;
+
+                ctx.globalAlpha = alpha;
+
                 // Box - dashed for interpolated frames
                 const isInterpolated = frameData.interpolated === true;
                 ctx.strokeStyle = color;
@@ -1202,6 +1444,20 @@
 
                 ctx.fillStyle = '#000';
                 ctx.fillText(label, sx1 + 4, sy1 - 5);
+
+                // Draw resize handles for selected track
+                if (isSelected && !isDrawMode && !isRoiDrawMode) {
+                    const handles = getResizeHandles(frameData.bbox);
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1;
+                    for (const [name, pos] of Object.entries(handles)) {
+                        ctx.fillRect(pos.x, pos.y, HANDLE_SIZE, HANDLE_SIZE);
+                        ctx.strokeRect(pos.x, pos.y, HANDLE_SIZE, HANDLE_SIZE);
+                    }
+                }
+
+                ctx.globalAlpha = 1.0;
             }
 
             // Draw ROIs
@@ -1213,10 +1469,8 @@
                     const p1 = videoToCanvas(roi.points[0].x, roi.points[0].y);
                     const p2 = videoToCanvas(roi.points[1].x, roi.points[1].y);
                     ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-                    // Fill with semi-transparent color
                     ctx.fillStyle = roi.color + '15';
                     ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-                    // Label
                     ctx.font = 'bold 11px sans-serif';
                     const lw = ctx.measureText(roi.name).width;
                     ctx.fillStyle = roi.color + 'CC';
@@ -1233,10 +1487,8 @@
                     }
                     ctx.closePath();
                     ctx.stroke();
-                    // Fill
                     ctx.fillStyle = roi.color + '15';
                     ctx.fill();
-                    // Label
                     ctx.font = 'bold 11px sans-serif';
                     const lw = ctx.measureText(roi.name).width;
                     ctx.fillStyle = roi.color + 'CC';
@@ -1321,6 +1573,7 @@
 
             for (const track of filtered) {
                 const isVisible = currentFrame >= track.start_frame && currentFrame <= track.end_frame;
+                const outsideRoi = roiFilterActive && rois.length > 0 && !trackInAnyRoi(track);
 
                 const div = document.createElement('div');
                 div.className = 'track-item';
@@ -1328,6 +1581,7 @@
                 if (track.needs_review) div.classList.add('needs-review');
                 if (track.track_id === selectedTrackId) div.classList.add('selected');
                 if (isVisible) div.classList.add('active-frame');
+                if (outsideRoi) div.classList.add('roi-hidden');
 
                 const conf = track.avg_confidence ? Math.round(track.avg_confidence * 100) : '?';
                 div.innerHTML = `
@@ -1343,13 +1597,11 @@
 
                 div.onclick = () => {
                     selectTrack(track.track_id);
-                    // Jump to first frame of track if not currently visible
                     if (currentFrame < track.start_frame || currentFrame > track.end_frame) {
                         loadFrame(track.start_frame);
                     }
                 };
                 div.ondblclick = () => {
-                    // Double-click always jumps to start
                     selectTrack(track.track_id);
                     loadFrame(track.start_frame);
                 };
@@ -1369,6 +1621,11 @@
 
             updateActionButtons();
             drawBoxes();
+
+            // Enable pointer events on canvas for resize handles in select mode
+            if (!isDrawMode && !isRoiDrawMode && selectedTrackId !== null) {
+                canvas.style.pointerEvents = 'auto';
+            }
         }
 
         function updateActionButtons() {
@@ -1434,7 +1691,6 @@
                 return;
             }
 
-            // Gap preview on selection change
             const gapInfo = document.getElementById('mergeGapInfo');
             select.onchange = function() {
                 const targetId = parseInt(this.value);
@@ -1470,7 +1726,6 @@
             const targetTrack = tracks.find(t => t.track_id === targetId);
 
             if (sourceTrack && targetTrack) {
-                // Determine chronological order for interpolation
                 const allSource = [...sourceTrack.frames].sort((a, b) => a.frame - b.frame);
                 const allTarget = [...targetTrack.frames].sort((a, b) => a.frame - b.frame);
 
@@ -1483,10 +1738,8 @@
                     lateFrames = allSource;
                 }
 
-                // Generate interpolated frames for the gap
                 const interpolatedFrames = interpolateFrames(earlyFrames, lateFrames);
 
-                // Merge all frames, avoiding duplicates
                 const existingFrames = new Set(targetTrack.frames.map(f => f.frame));
                 for (const f of sourceTrack.frames) {
                     if (!existingFrames.has(f.frame)) {
@@ -1505,7 +1758,6 @@
                 targetTrack.start_frame = targetTrack.frames[0].frame;
                 targetTrack.end_frame = targetTrack.frames[targetTrack.frames.length - 1].frame;
 
-                // Remove source
                 tracks = tracks.filter(t => t.track_id !== selectedTrackId);
                 selectedTrackId = targetId;
 
@@ -1542,11 +1794,9 @@
 
             saveState();
 
-            // Update original
             track.frames = before;
             track.end_frame = before[before.length - 1].frame;
 
-            // Create new
             const newId = Math.max(...tracks.map(t => t.track_id)) + 1;
             tracks.push({
                 track_id: newId,
@@ -1618,29 +1868,52 @@
         document.getElementById('prev10').onclick = () => loadFrame(currentFrame - 10);
         document.getElementById('next10').onclick = () => loadFrame(currentFrame + 10);
 
+        // Improved playback using requestAnimationFrame
         document.getElementById('playBtn').onclick = function() {
             isPlaying = !isPlaying;
             this.textContent = isPlaying ? 'Pause' : 'Play';
             this.classList.toggle('active', isPlaying);
 
             if (isPlaying) {
-                playInterval = setInterval(() => {
-                    if (currentFrame >= totalFrames - 1) {
-                        isPlaying = false;
-                        document.getElementById('playBtn').textContent = 'Play';
-                        document.getElementById('playBtn').classList.remove('active');
-                        clearInterval(playInterval);
-                    } else {
+                const targetInterval = 1000 / (fps || 25);  // ms per frame
+                let lastTime = performance.now();
+                let accumulator = 0;
+
+                function playStep(timestamp) {
+                    if (!isPlaying) return;
+
+                    accumulator += timestamp - lastTime;
+                    lastTime = timestamp;
+
+                    // Advance frames based on elapsed time
+                    while (accumulator >= targetInterval) {
+                        accumulator -= targetInterval;
+                        if (currentFrame >= totalFrames - 1) {
+                            isPlaying = false;
+                            document.getElementById('playBtn').textContent = 'Play';
+                            document.getElementById('playBtn').classList.remove('active');
+                            return;
+                        }
                         loadFrame(currentFrame + 1);
                     }
-                }, 100);
+
+                    playTimer = requestAnimationFrame(playStep);
+                }
+
+                playTimer = requestAnimationFrame(playStep);
             } else {
-                clearInterval(playInterval);
+                if (playTimer) {
+                    cancelAnimationFrame(playTimer);
+                    playTimer = null;
+                }
             }
         };
 
         // Toolbar
-        document.getElementById('selectMode').onclick = () => setDrawMode(false);
+        document.getElementById('selectMode').onclick = () => {
+            setDrawMode(false);
+            if (isRoiDrawMode) setRoiDrawMode(false);
+        };
         document.getElementById('drawMode').onclick = () => setDrawMode(true);
         document.getElementById('undoBtn').onclick = undo;
         document.getElementById('redoBtn').onclick = redo;
@@ -1652,6 +1925,13 @@
         };
         document.getElementById('roiPolyBtn').onclick = () => {
             setRoiDrawMode(isRoiDrawMode && roiDrawType === 'polygon' ? false : 'polygon');
+        };
+
+        // ROI filter toggle
+        document.getElementById('roiFilterCheck').onchange = function() {
+            roiFilterActive = this.checked;
+            renderTracks(currentFilter);
+            drawBoxes();
         };
 
         // Filter buttons
