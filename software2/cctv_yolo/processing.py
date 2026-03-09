@@ -31,6 +31,7 @@ class ProcessingWorker(QThread):
         conf: float = 0.25,
         session_id: str = "",
         models_dir: str = "",
+        processing_roi: dict = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -40,6 +41,7 @@ class ProcessingWorker(QThread):
         self.conf = conf
         self.session_id = session_id
         self.models_dir = models_dir
+        self.processing_roi = processing_roi
 
     def run(self):
         try:
@@ -57,6 +59,7 @@ class ProcessingWorker(QThread):
                 session_id=self.session_id,
                 progress_callback=_on_progress,
                 models_dir=self.models_dir if self.models_dir else None,
+                processing_roi=self.processing_roi,
             )
             self.progress.emit(self.session_id, 100)
             self.finished.emit(self.session_id)

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from cctv_yolo.processing import ProcessingWorker, ExportWorker
+from cctv_yolo.video_canvas import VideoCanvas
 
 # ---------------------------------------------------------------------------
 # Style constants
@@ -46,6 +47,26 @@ QFrame#videoCard {{
 QFrame#videoCard:hover {{
     border: 1px solid rgba(78, 204, 163, 0.4);
     background-color: #1b2844;
+}}
+"""
+
+CARD_SELECTED_STYLE = f"""
+QFrame#videoCard {{
+    background-color: #1b2844;
+    border: 2px solid {ACCENT};
+    border-radius: 8px;
+}}
+"""
+
+ROI_BTN_ACTIVE = f"""
+QPushButton {{
+    background-color: {ACCENT};
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-weight: bold;
+    font-size: 11px;
 }}
 """
 
@@ -250,6 +271,8 @@ class PreprocessingTab(QWidget):
         self.data_manager = data_manager
         self._workers = {}  # session_id -> ProcessingWorker or ExportWorker
         self._card_widgets = {}  # session_id -> dict of widgets in the card
+        self._selected_session_id = None  # currently selected video for preview
+        self._current_roi = None  # ROI dict for the selected video
         self._setup_ui()
         self._populate_models()
         self.refresh()
@@ -351,7 +374,77 @@ class PreprocessingTab(QWidget):
         self.grid_layout.setSpacing(12)
 
         scroll.setWidget(self.grid_widget)
-        layout.addWidget(scroll, stretch=1)
+
+        # --- Main content: grid on top, ROI preview below ---
+        # Use a splitter-like layout: grid gets more space, preview is collapsible
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+        content_layout.addWidget(scroll, stretch=1)
+
+        # --- ROI Preview Panel (hidden until a video is selected) ---
+        self.roi_panel = QFrame()
+        self.roi_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {PANEL};
+                border: 1px solid {BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        self.roi_panel.setVisible(False)
+
+        roi_panel_layout = QVBoxLayout(self.roi_panel)
+        roi_panel_layout.setContentsMargins(12, 8, 12, 8)
+        roi_panel_layout.setSpacing(6)
+
+        # Panel header row
+        roi_header = QHBoxLayout()
+        self.roi_title = QLabel("ROI Preview")
+        self.roi_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT}; border: none;")
+        roi_header.addWidget(self.roi_title)
+        roi_header.addStretch()
+
+        self.btn_roi_rect = QPushButton("Draw Rect ROI")
+        self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_rect.setCheckable(True)
+        self.btn_roi_rect.clicked.connect(self._on_roi_rect_mode)
+        roi_header.addWidget(self.btn_roi_rect)
+
+        self.btn_roi_poly = QPushButton("Draw Polygon ROI")
+        self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_poly.setCheckable(True)
+        self.btn_roi_poly.clicked.connect(self._on_roi_poly_mode)
+        roi_header.addWidget(self.btn_roi_poly)
+
+        self.btn_roi_clear = QPushButton("Clear ROI")
+        self.btn_roi_clear.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_clear.clicked.connect(self._on_roi_clear)
+        roi_header.addWidget(self.btn_roi_clear)
+
+        self.btn_roi_close = QPushButton("Close Preview")
+        self.btn_roi_close.setStyleSheet(BROWSE_BTN)
+        self.btn_roi_close.clicked.connect(self._close_preview)
+        roi_header.addWidget(self.btn_roi_close)
+
+        roi_panel_layout.addLayout(roi_header)
+
+        # VideoCanvas for preview
+        self.preview_canvas = VideoCanvas()
+        self.preview_canvas.setMinimumHeight(240)
+        self.preview_canvas.setMaximumHeight(360)
+        self.preview_canvas.roi_rect_drawn.connect(self._on_roi_rect_drawn)
+        self.preview_canvas.roi_polygon_drawn.connect(self._on_roi_polygon_drawn)
+        roi_panel_layout.addWidget(self.preview_canvas)
+
+        # ROI status label
+        self.roi_status = QLabel("No ROI set. Detections from full frame will be used.")
+        self.roi_status.setStyleSheet("color: #999; font-size: 11px; border: none;")
+        roi_panel_layout.addWidget(self.roi_status)
+
+        content_layout.addWidget(self.roi_panel)
+
+        layout.addWidget(content_widget, stretch=1)
 
     def _make_stat_card(self, label_text, value_text):
         """Create a stat card widget and return dict with frame, value_label."""
@@ -454,6 +547,161 @@ class PreprocessingTab(QWidget):
         conf = value / 100.0
         self.lbl_conf_value.setText(f"{conf:.2f}")
         self.data_manager.set_last_confidence(conf)
+
+    # ------------------------------------------------------------------
+    # ROI preview panel
+    # ------------------------------------------------------------------
+
+    def _select_video(self, session_id):
+        """Select a video for ROI preview."""
+        # Deselect previous card
+        if self._selected_session_id and self._selected_session_id in self._card_widgets:
+            prev = self._card_widgets[self._selected_session_id]
+            prev["frame"].setStyleSheet(CARD_STYLE)
+
+        self._selected_session_id = session_id
+
+        # Highlight the selected card
+        if session_id in self._card_widgets:
+            self._card_widgets[session_id]["frame"].setStyleSheet(CARD_SELECTED_STYLE)
+
+        # Open video in preview canvas
+        video_path = self.data_manager.get_video_path(session_id)
+        if not video_path or not video_path.exists():
+            return
+
+        self.preview_canvas.open_video(str(video_path))
+        self.preview_canvas.set_frame(0)
+        self.preview_canvas.drawing_mode = "select"
+
+        # Load saved ROI for this session
+        self._current_roi = self.data_manager.get_processing_roi(session_id)
+        self._apply_roi_to_canvas()
+
+        # Update ROI status label
+        if self._current_roi:
+            roi_type = self._current_roi["type"]
+            n_pts = len(self._current_roi["points"])
+            self.roi_status.setText(
+                f"ROI set ({roi_type}, {n_pts} points). "
+                f"Only detections inside the ROI will be kept during processing."
+            )
+        else:
+            self.roi_status.setText("No ROI set. Detections from full frame will be used.")
+
+        # Update title and show panel
+        display_name = video_path.name
+        self.roi_title.setText(f"ROI Preview — {display_name}")
+        self.roi_panel.setVisible(True)
+
+        # Reset button states
+        self.btn_roi_rect.setChecked(False)
+        self.btn_roi_poly.setChecked(False)
+        self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+
+    def _close_preview(self):
+        """Close the ROI preview panel."""
+        self.preview_canvas.close_video()
+        self.roi_panel.setVisible(False)
+
+        # Deselect card
+        if self._selected_session_id and self._selected_session_id in self._card_widgets:
+            self._card_widgets[self._selected_session_id]["frame"].setStyleSheet(CARD_STYLE)
+        self._selected_session_id = None
+        self._current_roi = None
+
+    def _on_roi_rect_mode(self, checked):
+        """Toggle rect ROI drawing mode."""
+        if checked:
+            self.btn_roi_poly.setChecked(False)
+            self.preview_canvas.drawing_mode = "roi_rect"
+            self.preview_canvas.set_cursor_for_mode()
+            self.btn_roi_rect.setStyleSheet(ROI_BTN_ACTIVE)
+            self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+        else:
+            self.preview_canvas.drawing_mode = "select"
+            self.preview_canvas.set_cursor_for_mode()
+            self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+
+    def _on_roi_poly_mode(self, checked):
+        """Toggle polygon ROI drawing mode."""
+        if checked:
+            self.btn_roi_rect.setChecked(False)
+            self.preview_canvas.drawing_mode = "roi_polygon"
+            self.preview_canvas.set_cursor_for_mode()
+            self.btn_roi_poly.setStyleSheet(ROI_BTN_ACTIVE)
+            self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        else:
+            self.preview_canvas.drawing_mode = "select"
+            self.preview_canvas.set_cursor_for_mode()
+            self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+
+    def _on_roi_rect_drawn(self, p1, p2):
+        """Handle rect ROI drawn on the preview canvas."""
+        self._current_roi = {
+            "type": "rect",
+            "points": [p1, p2],
+        }
+        self._save_and_display_roi()
+
+        # Exit drawing mode
+        self.btn_roi_rect.setChecked(False)
+        self.preview_canvas.drawing_mode = "select"
+        self.preview_canvas.set_cursor_for_mode()
+        self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+
+    def _on_roi_polygon_drawn(self, points):
+        """Handle polygon ROI drawn on the preview canvas."""
+        if len(points) < 3:
+            return
+        self._current_roi = {
+            "type": "polygon",
+            "points": points,
+        }
+        self._save_and_display_roi()
+
+        # Exit drawing mode
+        self.btn_roi_poly.setChecked(False)
+        self.preview_canvas.drawing_mode = "select"
+        self.preview_canvas.set_cursor_for_mode()
+        self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+
+    def _on_roi_clear(self):
+        """Clear the ROI for the selected video."""
+        self._current_roi = None
+        if self._selected_session_id:
+            self.data_manager.set_processing_roi(self._selected_session_id, None)
+        self._apply_roi_to_canvas()
+        self.roi_status.setText("No ROI set. Detections from full frame will be used.")
+
+    def _save_and_display_roi(self):
+        """Save the current ROI and update the canvas overlay."""
+        if self._selected_session_id and self._current_roi:
+            self.data_manager.set_processing_roi(
+                self._selected_session_id, self._current_roi
+            )
+        self._apply_roi_to_canvas()
+
+        # Update status label
+        if self._current_roi:
+            roi_type = self._current_roi["type"]
+            n_pts = len(self._current_roi["points"])
+            self.roi_status.setText(
+                f"ROI set ({roi_type}, {n_pts} points). "
+                f"Only detections inside the ROI will be kept during processing."
+            )
+
+    def _apply_roi_to_canvas(self):
+        """Update the preview canvas ROI overlay."""
+        if self._current_roi:
+            roi_display = dict(self._current_roi)
+            roi_display["name"] = "Processing ROI"
+            roi_display["color"] = "#ff6b6b"
+            self.preview_canvas.rois = [roi_display]
+        else:
+            self.preview_canvas.rois = []
+        self.preview_canvas.update()
 
     # ------------------------------------------------------------------
     # Refresh / populate
@@ -632,6 +880,14 @@ class PreprocessingTab(QWidget):
         btn_row.setContentsMargins(12, 0, 12, 0)
         btn_row.setSpacing(6)
 
+        # Preview button (always shown)
+        btn_preview = QPushButton("Preview")
+        btn_preview.setStyleSheet(SECONDARY_BTN)
+        btn_preview.clicked.connect(
+            lambda checked=False, sid=session_id: self._select_video(sid)
+        )
+        btn_row.addWidget(btn_preview)
+
         if status == "unprocessed":
             btn_process = QPushButton("Process")
             btn_process.setStyleSheet(ACTION_BTN)
@@ -695,6 +951,9 @@ class PreprocessingTab(QWidget):
         model = self.model_combo.currentText()
         conf = self.conf_slider.value() / 100.0
 
+        # Load saved ROI for this session (if any)
+        processing_roi = self.data_manager.get_processing_roi(session_id)
+
         self.data_manager.set_processing_status(session_id, "processing", progress=0)
 
         worker = ProcessingWorker(
@@ -704,6 +963,7 @@ class PreprocessingTab(QWidget):
             conf=conf,
             session_id=session_id,
             models_dir=str(self.data_manager.models_dir),
+            processing_roi=processing_roi,
         )
         worker.progress.connect(self._on_processing_progress)
         worker.finished.connect(self._on_processing_finished)

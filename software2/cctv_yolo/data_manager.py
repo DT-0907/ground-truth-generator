@@ -819,3 +819,36 @@ class DataManager:
     def clear_export_job(self, session_id: str):
         """Remove an export job entry."""
         self.export_jobs.pop(session_id, None)
+
+    # ------------------------------------------------------------------
+    # Processing ROI persistence
+    # ------------------------------------------------------------------
+
+    def get_processing_roi(self, session_id: str) -> dict | None:
+        """Load a saved processing ROI for a session."""
+        roi_file = self.config_dir / "processing_rois.json"
+        if not roi_file.exists():
+            return None
+        try:
+            with open(roi_file, "r") as f:
+                data = json.load(f)
+            return data.get(session_id)
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def set_processing_roi(self, session_id: str, roi: dict | None):
+        """Save (or clear) a processing ROI for a session."""
+        roi_file = self.config_dir / "processing_rois.json"
+        data = {}
+        if roi_file.exists():
+            try:
+                with open(roi_file, "r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        if roi is None:
+            data.pop(session_id, None)
+        else:
+            data[session_id] = roi
+        with open(roi_file, "w") as f:
+            json.dump(data, f, indent=2)

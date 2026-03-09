@@ -20,10 +20,39 @@ VEHICLE_CLASSES = {
 }
 
 
+def _point_in_polygon(px, py, polygon):
+    """Ray-casting point-in-polygon test."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _bbox_center_in_roi(bbox, roi):
+    """Check if bbox center is inside ROI polygon/rect."""
+    cx = (bbox[0] + bbox[2]) / 2
+    cy = (bbox[1] + bbox[3]) / 2
+    if roi.get('type') == 'rect':
+        pts = roi['points']
+        x1, y1 = pts[0]['x'], pts[0]['y']
+        x2, y2 = pts[1]['x'], pts[1]['y']
+        return min(x1, x2) <= cx <= max(x1, x2) and min(y1, y2) <= cy <= max(y1, y2)
+    else:  # polygon
+        poly = [(p['x'], p['y']) for p in roi['points']]
+        return _point_in_polygon(cx, cy, poly)
+
+
 def process_video(video_path: str, output_dir: str = "data/tracks",
                   model_name: str = "yolov8m.pt", conf_threshold: float = 0.25,
                   feedback_file: str = None, session_id: str = None,
-                  progress_callback=None, models_dir: str = None) -> dict:
+                  progress_callback=None, models_dir: str = None,
+                  processing_roi: dict = None) -> dict:
     """
     Process a video file: detect vehicles and track them across frames.
 
@@ -37,6 +66,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         progress_callback: Optional callable(percent: int) for progress updates
         models_dir: Optional path to local models directory. If not given,
                     defaults to ~/Documents/CCTV-YOLO/models/
+        processing_roi: Optional ROI dict to filter detections. Only detections
+                       whose bbox center falls inside the ROI are kept.
+                       Format: {"type": "rect"|"polygon", "points": [...]}
 
     Returns:
         dict with tracks data
@@ -137,6 +169,10 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             class_id = int(boxes.cls[i].item())
             class_name = VEHICLE_CLASSES.get(class_id, 'unknown')
 
+            # Filter by processing ROI if defined
+            if processing_roi and not _bbox_center_in_roi(bbox, processing_roi):
+                continue
+
             # Apply confidence adjustment from feedback
             adjustment_key = f"{class_name}"
             if adjustment_key in confidence_adjustments:
@@ -185,6 +221,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         'processed_at': datetime.now().isoformat(),
         'model': model_name,
         'conf_threshold': conf_threshold,
+        'processing_roi': processing_roi,
         'tracks': tracks,
         'stats': {
             'total_tracks': len(tracks),
