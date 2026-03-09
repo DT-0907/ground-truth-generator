@@ -67,6 +67,7 @@ class VideoCanvas(QWidget):
         self.selected_track_id = None
         self.current_frame = 0
         self.rois = []
+        self.dimmed_track_ids = set()  # track IDs to draw at reduced opacity
 
         # Drawing state
         self.drawing_mode = "select"  # "select", "draw_box", "roi_rect", "roi_polygon"
@@ -305,6 +306,9 @@ class VideoCanvas(QWidget):
             if not frame_data:
                 continue
 
+            track_id = track.get("track_id")
+            is_dimmed = track_id in self.dimmed_track_ids
+
             x1, y1, x2, y2 = frame_data["bbox"]
             sx1 = dr.x() + x1 * scale_x
             sy1 = dr.y() + y1 * scale_y
@@ -312,9 +316,13 @@ class VideoCanvas(QWidget):
             sh = (y2 - y1) * scale_y
 
             class_name = track.get("class", "unknown")
-            color = CLASS_COLORS.get(class_name, CLASS_COLORS["unknown"])
-            is_selected = track.get("track_id") == self.selected_track_id
+            color = QColor(CLASS_COLORS.get(class_name, CLASS_COLORS["unknown"]))
+            is_selected = track_id == self.selected_track_id
             is_interpolated = frame_data.get("interpolated", False)
+
+            # Reduce opacity for dimmed (outside ROI) tracks
+            if is_dimmed:
+                color.setAlpha(40)
 
             # Bounding box outline
             pen = QPen(color, 4 if is_selected else 2)
@@ -325,22 +333,23 @@ class VideoCanvas(QWidget):
             painter.drawRect(QRectF(sx1, sy1, sw, sh))
 
             # Semi-transparent fill for selected track
-            if is_selected:
+            if is_selected and not is_dimmed:
                 fill_color = QColor(color)
                 fill_color.setAlpha(50)
                 painter.fillRect(QRectF(sx1, sy1, sw, sh), fill_color)
 
             # Label above the box
-            interp_suffix = " [interp]" if is_interpolated else ""
-            label = f"#{track.get('track_id', '?')} {class_name}{interp_suffix}"
-            text_w = fm.horizontalAdvance(label) + 8
+            if not is_dimmed:
+                interp_suffix = " [interp]" if is_interpolated else ""
+                label = f"#{track.get('track_id', '?')} {class_name}{interp_suffix}"
+                text_w = fm.horizontalAdvance(label) + 8
 
-            label_bg = QColor(color)
-            if is_interpolated:
-                label_bg.setAlpha(170)
-            painter.fillRect(QRectF(sx1, sy1 - text_h, text_w, text_h), label_bg)
-            painter.setPen(QColor("#000"))
-            painter.drawText(QPointF(sx1 + 4, sy1 - 4), label)
+                label_bg = QColor(color)
+                if is_interpolated:
+                    label_bg.setAlpha(170)
+                painter.fillRect(QRectF(sx1, sy1 - text_h, text_w, text_h), label_bg)
+                painter.setPen(QColor("#000"))
+                painter.drawText(QPointF(sx1 + 4, sy1 - 4), label)
 
     def _paint_rois(self, painter, fm, text_h):
         """Draw all ROI overlays (rect and polygon)."""

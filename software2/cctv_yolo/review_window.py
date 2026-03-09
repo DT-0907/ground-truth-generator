@@ -1067,6 +1067,17 @@ class ReviewWindow(QMainWindow):
         self.sidebar.set_tracks(self.tracks, self.current_frame, self.selected_track_id)
         self.sidebar.set_rois(self.rois, self.tracks)
 
+        # Update canvas dimming based on ROI filter
+        if self.sidebar.is_roi_filter_active():
+            roi_ids = self.sidebar.get_roi_track_ids()
+            self.canvas.dimmed_track_ids = {
+                t.get("track_id") for t in self.tracks
+                if t.get("track_id") not in roi_ids
+            }
+        else:
+            self.canvas.dimmed_track_ids = set()
+        self.canvas.update()
+
     def _refresh_all(self):
         """Refresh both canvas and sidebar."""
         self.canvas.tracks = self.tracks

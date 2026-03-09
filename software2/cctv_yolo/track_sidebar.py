@@ -2,7 +2,8 @@
 Track sidebar — track list, filters, ROI panel, and action buttons.
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                                QPushButton, QScrollArea, QFrame, QSizePolicy)
+                                QPushButton, QScrollArea, QFrame, QSizePolicy,
+                                QCheckBox)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
@@ -43,6 +44,29 @@ QPushButton#split_btn:hover { background: #d68910; }
 QPushButton#save_btn { background: #4ecca3; color: #000; }
 QPushButton#save_btn:hover { background: #3db892; }
 QScrollArea { border: none; background: transparent; }
+QCheckBox {
+    color: #888;
+    font-size: 11px;
+    spacing: 4px;
+}
+QCheckBox:disabled {
+    color: #555;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #2d3a5a;
+    border-radius: 3px;
+    background: transparent;
+}
+QCheckBox::indicator:checked {
+    background: #4ecca3;
+    border-color: #4ecca3;
+}
+QCheckBox::indicator:disabled {
+    background: #1a1a2e;
+    border-color: #2d3a5a;
+}
 """
 
 CLASS_COLORS = {
@@ -176,6 +200,7 @@ class TrackSidebar(QWidget):
         self._current_filter = "all"
         self._has_unsaved = False
         self._rois = []
+        self._roi_track_ids = set()  # track IDs that pass through any ROI
 
         self._build_ui()
 
@@ -221,6 +246,10 @@ class TrackSidebar(QWidget):
             self._filter_buttons[name] = btn
             filter_layout.addWidget(btn)
         filter_layout.addStretch()
+        self._roi_filter_cb = QCheckBox("In ROI only")
+        self._roi_filter_cb.setEnabled(False)
+        self._roi_filter_cb.toggled.connect(self._on_roi_filter_toggled)
+        filter_layout.addWidget(self._roi_filter_cb)
         self._update_filter_buttons()
         layout.addWidget(filter_widget)
 
@@ -323,6 +352,15 @@ class TrackSidebar(QWidget):
         self.filter_changed.emit(name)
         self.refresh_tracks()
 
+    def _on_roi_filter_toggled(self, checked):
+        """Handle the 'In ROI only' checkbox toggle."""
+        self.filter_changed.emit(self._current_filter)
+        self.refresh_tracks()
+
+    def is_roi_filter_active(self):
+        """Return True if the ROI filter checkbox is checked and ROIs exist."""
+        return self._roi_filter_cb.isChecked() and bool(self._rois)
+
     def _update_filter_buttons(self):
         for name, btn in self._filter_buttons.items():
             if name == self._current_filter:
@@ -364,6 +402,11 @@ class TrackSidebar(QWidget):
     def set_rois(self, rois: list, tracks: list):
         """Update the ROI panel with current ROIs and recompute vehicle counts."""
         self._rois = rois
+        # Enable/disable the ROI filter checkbox
+        has_rois = bool(rois)
+        self._roi_filter_cb.setEnabled(has_rois)
+        if not has_rois:
+            self._roi_filter_cb.setChecked(False)
         # Clear existing ROI items
         while self._roi_list_layout.count():
             item = self._roi_list_layout.takeAt(0)
@@ -386,6 +429,36 @@ class TrackSidebar(QWidget):
     # ------------------------------------------------------------------
     # ROI helpers
     # ------------------------------------------------------------------
+
+    def _compute_roi_track_ids(self):
+        """Return the set of track IDs whose bbox center falls inside any ROI."""
+        ids = set()
+        for track in self._tracks:
+            for fd in track.get("frames", []):
+                cx = (fd["bbox"][0] + fd["bbox"][2]) / 2
+                cy = (fd["bbox"][1] + fd["bbox"][3]) / 2
+                if self._point_in_any_roi(cx, cy):
+                    ids.add(track.get("track_id"))
+                    break
+        return ids
+
+    def _point_in_any_roi(self, px, py):
+        """Check if a point falls inside any defined ROI."""
+        for roi in self._rois:
+            if roi.get("type") == "rect":
+                p1, p2 = roi["points"][0], roi["points"][1]
+                x1, y1 = p1["x"], p1["y"]
+                x2, y2 = p2["x"], p2["y"]
+                if min(x1, x2) <= px <= max(x1, x2) and min(y1, y2) <= py <= max(y1, y2):
+                    return True
+            elif roi.get("type") == "polygon":
+                if self._point_in_polygon(px, py, roi["points"]):
+                    return True
+        return False
+
+    def get_roi_track_ids(self):
+        """Return the set of track IDs that pass through any ROI (computed during last refresh)."""
+        return self._roi_track_ids
 
     def _compute_roi_stats(self, roi, tracks):
         """Count how many tracks pass through the given ROI."""
@@ -486,6 +559,13 @@ class TrackSidebar(QWidget):
         elif f not in ("all",):
             # Class filter (car, truck, bus, etc.)
             filtered = [t for t in filtered if t.get("class") == f]
+
+        # ROI filter: only keep tracks that pass through at least one ROI
+        if self.is_roi_filter_active():
+            self._roi_track_ids = self._compute_roi_track_ids()
+            filtered = [t for t in filtered if t.get("track_id") in self._roi_track_ids]
+        else:
+            self._roi_track_ids = set()
 
         # Sort: visible tracks first, then by track ID
         filtered.sort(key=lambda t: (
