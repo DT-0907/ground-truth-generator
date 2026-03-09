@@ -119,7 +119,9 @@ class MergeDialog(QDialog):
         other_tracks = [t for t in tracks if t["track_id"] != source_track_id]
         other_tracks.sort(key=lambda t: t["track_id"])
         for t in other_tracks:
-            label = f"#{t['track_id']} {t['class']} (F{t['start_frame']}-{t['end_frame']})"
+            sf = t.get('start_frame', t['frames'][0]['frame'] if t.get('frames') else 0)
+            ef = t.get('end_frame', t['frames'][-1]['frame'] if t.get('frames') else 0)
+            label = f"#{t['track_id']} {t['class']} (F{sf}-{ef})"
             self.combo.addItem(label, t["track_id"])
         layout.addWidget(self.combo)
 
@@ -150,8 +152,11 @@ class MergeDialog(QDialog):
         source = next((t for t in self.tracks if t["track_id"] == self.source_track_id), None)
         target = next((t for t in self.tracks if t["track_id"] == target_id), None)
         if source and target:
-            gap = max(0, max(target["start_frame"] - source["end_frame"],
-                             source["start_frame"] - target["end_frame"]) - 1)
+            s_start = source.get('start_frame', source['frames'][0]['frame'] if source.get('frames') else 0)
+            s_end = source.get('end_frame', source['frames'][-1]['frame'] if source.get('frames') else 0)
+            t_start = target.get('start_frame', target['frames'][0]['frame'] if target.get('frames') else 0)
+            t_end = target.get('end_frame', target['frames'][-1]['frame'] if target.get('frames') else 0)
+            gap = max(0, max(t_start - s_end, s_start - t_end) - 1)
             if gap > 0:
                 self.gap_label.setText(f"Gap: {gap} frames will be interpolated")
                 self.gap_label.setStyleSheet("color: #f39c12; font-size: 12px;")

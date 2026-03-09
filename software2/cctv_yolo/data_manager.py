@@ -49,12 +49,14 @@ class DataManager:
         self.corrections_dir = self.data_dir / "corrections"
         self.exports_dir = self.data_dir / "exports"
         self.config_dir = self._data_root / "config"
+        self.models_dir = self._data_root / "models"
         for d in [
             self.videos_dir,
             self.tracks_dir,
             self.corrections_dir,
             self.exports_dir,
             self.config_dir,
+            self.models_dir,
         ]:
             d.mkdir(parents=True, exist_ok=True)
 

@@ -41,6 +41,7 @@ def analyze_corrections(tracks_dir: str, corrections_dir: str, output_file: str 
         print("No correction files found")
         return
 
+    all_orig_tracks = {}
     for corr_file in correction_files:
         orig_file = tracks_dir / corr_file.name
         if not orig_file.exists():
@@ -55,6 +56,7 @@ def analyze_corrections(tracks_dir: str, corrections_dir: str, output_file: str 
 
         orig_tracks = {t['track_id']: t for t in original.get('tracks', [])}
         corr_tracks = {t['track_id']: t for t in corrected.get('tracks', [])}
+        all_orig_tracks.update(orig_tracks)
 
         stats['total_original_tracks'] += len(orig_tracks)
         stats['total_corrected_tracks'] += len(corr_tracks)
@@ -75,7 +77,7 @@ def analyze_corrections(tracks_dir: str, corrections_dir: str, output_file: str 
 
     confidence_adjustments = {}
     for cls, fp_count in stats['false_positive_by_class'].items():
-        total_class = sum(1 for t in orig_tracks.values() if t.get('class') == cls)
+        total_class = sum(1 for t in all_orig_tracks.values() if t.get('class') == cls)
         if total_class > 0:
             fp_rate = fp_count / total_class
             if fp_rate > 0.2:
