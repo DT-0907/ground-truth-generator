@@ -10,6 +10,19 @@ import cv2
 import numpy as np
 
 
+HANDLE_SIZE = 8
+
+HANDLE_CURSORS = {
+    'tl': Qt.SizeFDiagCursor,
+    'br': Qt.SizeFDiagCursor,
+    'tr': Qt.SizeBDiagCursor,
+    'bl': Qt.SizeBDiagCursor,
+    'tc': Qt.SizeVerCursor,
+    'bc': Qt.SizeVerCursor,
+    'ml': Qt.SizeHorCursor,
+    'mr': Qt.SizeHorCursor,
+}
+
 CLASS_COLORS = {
     "car": QColor("#3498db"),
     "truck": QColor("#e74c3c"),
@@ -32,6 +45,7 @@ class VideoCanvas(QWidget):
     roi_rect_drawn = Signal(dict, dict) # p1, p2 in video coords
     roi_polygon_drawn = Signal(list)    # list of {x, y} dicts in video coords
     frame_clicked = Signal(int, int)    # click position in video coords
+    bbox_resized = Signal(list)         # [x1, y1, x2, y2] in video coords
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -60,6 +74,12 @@ class VideoCanvas(QWidget):
         self._draw_start = None       # canvas coords tuple (cx, cy)
         self._draw_end = None         # canvas coords tuple (cx, cy)
         self._polygon_points = []     # canvas coords for in-progress polygon
+
+        # Resize state
+        self._resizing = False
+        self._resize_handle = None       # which handle is being dragged (e.g. 'tl')
+        self._resize_orig_bbox = None    # original bbox in video coords [x1,y1,x2,y2]
+        self._resize_preview_bbox = None # live preview bbox in video coords
 
         self.setStyleSheet("background-color: #000;")
 
@@ -176,6 +196,59 @@ class VideoCanvas(QWidget):
         return cx, cy
 
     # ------------------------------------------------------------------
+    # Resize handles
+    # ------------------------------------------------------------------
+
+    def _get_selected_bbox_handles(self):
+        """Get handle rects for the currently selected track's bbox on current frame."""
+        if not self.selected_track_id or not self._display_rect:
+            return {}
+        for track in self.tracks:
+            if track.get('track_id') == self.selected_track_id:
+                for fd in track.get('frames', []):
+                    if fd.get('frame') == self.current_frame:
+                        bbox = fd['bbox']
+                        # If we're actively resizing, use the preview bbox instead
+                        if self._resizing and self._resize_preview_bbox is not None:
+                            bbox = self._resize_preview_bbox
+                        return self._compute_handles(bbox)
+        return {}
+
+    def _compute_handles(self, bbox):
+        """Compute handle positions for a bbox in canvas coordinates."""
+        dr = self._display_rect
+        if dr.width() == 0 or self._video_width == 0:
+            return {}
+        scale_x = dr.width() / self._video_width
+        scale_y = dr.height() / self._video_height
+        x1c = dr.x() + bbox[0] * scale_x
+        y1c = dr.y() + bbox[1] * scale_y
+        x2c = dr.x() + bbox[2] * scale_x
+        y2c = dr.y() + bbox[3] * scale_y
+        mx = (x1c + x2c) / 2
+        my = (y1c + y2c) / 2
+        hs = HANDLE_SIZE / 2
+        return {
+            'tl': QRectF(x1c - hs, y1c - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'tc': QRectF(mx - hs, y1c - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'tr': QRectF(x2c - hs, y1c - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'ml': QRectF(x1c - hs, my - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'mr': QRectF(x2c - hs, my - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'bl': QRectF(x1c - hs, y2c - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'bc': QRectF(mx - hs, y2c - hs, HANDLE_SIZE, HANDLE_SIZE),
+            'br': QRectF(x2c - hs, y2c - hs, HANDLE_SIZE, HANDLE_SIZE),
+        }
+
+    def _hit_test_handles(self, cx, cy):
+        """Return the handle key ('tl', 'tc', ...) if (cx,cy) hits a handle, else None."""
+        handles = self._get_selected_bbox_handles()
+        pt = QPointF(cx, cy)
+        for key, rect in handles.items():
+            if rect.contains(pt):
+                return key
+        return None
+
+    # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
 
@@ -214,6 +287,10 @@ class VideoCanvas(QWidget):
 
         # 4. Draw in-progress shapes
         self._paint_in_progress(painter)
+
+        # 5. Draw resize handles for selected track's bbox
+        if self.drawing_mode == "select":
+            self._paint_resize_handles(painter, dr, scale_x, scale_y)
 
         painter.end()
 
@@ -345,6 +422,29 @@ class VideoCanvas(QWidget):
                 painter.drawEllipse(QPointF(p[0], p[1]), 4, 4)
             painter.setBrush(Qt.NoBrush)
 
+    def _paint_resize_handles(self, painter, dr, scale_x, scale_y):
+        """Draw resize handles for the selected track's bbox, and a preview box if resizing."""
+        # If resizing, draw the preview bbox
+        if self._resizing and self._resize_preview_bbox is not None:
+            bbox = self._resize_preview_bbox
+            sx1 = dr.x() + bbox[0] * scale_x
+            sy1 = dr.y() + bbox[1] * scale_y
+            sw = (bbox[2] - bbox[0]) * scale_x
+            sh = (bbox[3] - bbox[1]) * scale_y
+            pen = QPen(QColor("#ffffff"), 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(sx1, sy1, sw, sh))
+
+        # Draw the 8 handles
+        handles = self._get_selected_bbox_handles()
+        if not handles:
+            return
+        for key, rect in handles.items():
+            painter.setPen(QPen(QColor("#000000"), 1))
+            painter.setBrush(QBrush(QColor("#ffffff")))
+            painter.drawRect(rect)
+
     # ------------------------------------------------------------------
     # Mouse events
     # ------------------------------------------------------------------
@@ -366,19 +466,84 @@ class VideoCanvas(QWidget):
             self._draw_end = (cx, cy)
             return
 
-        # Select mode -- emit click in video coords
+        # Select mode -- check for resize handle hit first, then emit click
         if self.drawing_mode == "select":
+            handle = self._hit_test_handles(cx, cy)
+            if handle:
+                # Start resizing
+                self._resizing = True
+                self._resize_handle = handle
+                # Find the original bbox in video coords
+                for track in self.tracks:
+                    if track.get('track_id') == self.selected_track_id:
+                        for fd in track.get('frames', []):
+                            if fd.get('frame') == self.current_frame:
+                                self._resize_orig_bbox = list(fd['bbox'])
+                                self._resize_preview_bbox = list(fd['bbox'])
+                                break
+                        break
+                return
+
             vx, vy = self._canvas_to_video(cx, cy)
             self.frame_clicked.emit(int(vx), int(vy))
 
     def mouseMoveEvent(self, event):
-        if self._is_drawing and self.drawing_mode in ("draw_box", "roi_rect"):
-            pos = event.position()
-            self._draw_end = (pos.x(), pos.y())
+        pos = event.position()
+        cx, cy = pos.x(), pos.y()
+
+        # Resize dragging
+        if self._resizing and self._resize_orig_bbox is not None:
+            vx, vy = self._canvas_to_video(cx, cy)
+            orig = self._resize_orig_bbox
+            new_bbox = list(orig)
+            h = self._resize_handle
+
+            # Adjust edges based on which handle is being dragged
+            if h in ('tl', 'ml', 'bl'):
+                new_bbox[0] = vx  # adjust x1
+            if h in ('tr', 'mr', 'br'):
+                new_bbox[2] = vx  # adjust x2
+            if h in ('tl', 'tc', 'tr'):
+                new_bbox[1] = vy  # adjust y1
+            if h in ('bl', 'bc', 'br'):
+                new_bbox[3] = vy  # adjust y2
+
+            # Ensure x1 < x2 and y1 < y2
+            if new_bbox[0] > new_bbox[2]:
+                new_bbox[0], new_bbox[2] = new_bbox[2], new_bbox[0]
+            if new_bbox[1] > new_bbox[3]:
+                new_bbox[1], new_bbox[3] = new_bbox[3], new_bbox[1]
+
+            self._resize_preview_bbox = new_bbox
             self.update()
+            return
+
+        if self._is_drawing and self.drawing_mode in ("draw_box", "roi_rect"):
+            self._draw_end = (cx, cy)
+            self.update()
+            return
+
+        # Cursor changes for handle hover (select mode only)
+        if self.drawing_mode == "select" and not self._is_drawing:
+            handle = self._hit_test_handles(cx, cy)
+            if handle:
+                self.setCursor(HANDLE_CURSORS[handle])
+            else:
+                self.setCursor(Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton:
+            return
+
+        # Finalize resize
+        if self._resizing and self._resize_preview_bbox is not None:
+            final_bbox = self._resize_preview_bbox
+            self._resizing = False
+            self._resize_handle = None
+            self._resize_orig_bbox = None
+            self._resize_preview_bbox = None
+            self.bbox_resized.emit(final_bbox)
+            self.update()
             return
 
         if self._is_drawing and self.drawing_mode in ("draw_box", "roi_rect"):

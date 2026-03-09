@@ -391,6 +391,7 @@ class ReviewWindow(QMainWindow):
 
         # --- Connect canvas signals ---
         self.canvas.box_drawn.connect(self._on_box_drawn)
+        self.canvas.bbox_resized.connect(self._on_bbox_resized)
         self.canvas.roi_rect_drawn.connect(self._on_roi_rect_drawn)
         self.canvas.roi_polygon_drawn.connect(self._on_roi_polygon_drawn)
 
@@ -907,6 +908,19 @@ class ReviewWindow(QMainWindow):
         self._refresh_all()
         self._set_mode("select")
         self.status_bar.showMessage(f"Created track #{new_id} ({new_class})")
+
+    def _on_bbox_resized(self, new_bbox):
+        """Handle a bounding box resize from the canvas."""
+        track = self._find_track(self.selected_track_id)
+        if not track:
+            return
+        self._push_undo()
+        frame_data = self._get_track_frame(track, self.current_frame)
+        if frame_data:
+            frame_data['bbox'] = new_bbox
+        self._mark_unsaved()
+        self._refresh_all()
+        self.status_bar.showMessage(f"Resized bbox for track #{self.selected_track_id}")
 
     # ------------------------------------------------------------------
     # ROI operations
