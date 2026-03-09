@@ -295,16 +295,16 @@ class ReviewWindow(QMainWindow):
         self.lbl_mode.setStyleSheet(f"color: {ACCENT}; font-weight: bold; padding: 0 8px;")
         self.toolbar.addWidget(self.lbl_mode)
 
-        # Connect toolbar buttons
-        self.btn_select.clicked.connect(lambda: self._set_mode("select"))
-        self.btn_draw.clicked.connect(lambda: self._set_mode("draw_box"))
-        self.btn_undo.clicked.connect(self._undo)
-        self.btn_redo.clicked.connect(self._redo)
-        self.btn_copy_next.clicked.connect(self._copy_to_next)
-        self.btn_copy_prev.clicked.connect(self._copy_to_prev)
-        self.btn_next_review.clicked.connect(self._next_review)
-        self.btn_roi_rect.clicked.connect(lambda: self._set_mode("roi_rect"))
-        self.btn_roi_poly.clicked.connect(lambda: self._set_mode("roi_polygon"))
+        # Connect toolbar buttons (QAction uses .triggered, not .clicked)
+        self.btn_select.triggered.connect(lambda: self._set_mode("select"))
+        self.btn_draw.triggered.connect(lambda: self._set_mode("draw_box"))
+        self.btn_undo.triggered.connect(self._undo)
+        self.btn_redo.triggered.connect(self._redo)
+        self.btn_copy_next.triggered.connect(self._copy_to_next)
+        self.btn_copy_prev.triggered.connect(self._copy_to_prev)
+        self.btn_next_review.triggered.connect(self._next_review)
+        self.btn_roi_rect.triggered.connect(lambda: self._set_mode("roi_rect"))
+        self.btn_roi_poly.triggered.connect(lambda: self._set_mode("roi_polygon"))
 
         # --- Splitter: canvas + sidebar ---
         self.splitter = QSplitter(Qt.Horizontal)
@@ -528,17 +528,20 @@ class ReviewWindow(QMainWindow):
     # Frame navigation
     # ------------------------------------------------------------------
 
-    def _go_to_frame(self, frame_num):
-        """Navigate to a specific frame number."""
+    def _go_to_frame(self, frame_num, lightweight=False):
+        """Navigate to a specific frame number.
+
+        If lightweight=True, skip expensive sidebar refresh (used during playback).
+        """
         frame_num = max(0, min(frame_num, self.total_frames - 1)) if self.total_frames > 0 else 0
         self.current_frame = frame_num
 
-        # Update canvas
-        self.canvas.set_frame(frame_num)
+        # Update canvas properties BEFORE set_frame so the repaint has correct data
         self.canvas.tracks = self.tracks
         self.canvas.rois = self.rois
         self.canvas.selected_track_id = self.selected_track_id
         self.canvas.current_frame = frame_num
+        self.canvas.set_frame(frame_num)
 
         # Update frame controls (block signals to avoid recursion)
         self.frame_slider.blockSignals(True)
@@ -551,9 +554,10 @@ class ReviewWindow(QMainWindow):
 
         self.lbl_frame_info.setText(f"Frame {frame_num} / {self.total_frames}")
 
-        # Update sidebar
+        # Update sidebar — lightweight during playback to avoid stutter
         self.sidebar.set_current_frame(frame_num)
-        self._refresh_sidebar()
+        if not lightweight:
+            self._refresh_sidebar()
 
     def _step_frame(self, delta):
         """Step forward or backward by delta frames."""
@@ -576,6 +580,8 @@ class ReviewWindow(QMainWindow):
             self._play()
 
     def _play(self):
+        if self.total_frames <= 0:
+            return
         self.playing = True
         self.btn_play.setText("Pause")
         self.btn_play.setStyleSheet(PLAY_BTN_PLAYING)
@@ -586,12 +592,14 @@ class ReviewWindow(QMainWindow):
         self.btn_play.setText("Play")
         self.btn_play.setStyleSheet(PLAY_BTN_PAUSED)
         self.play_timer.stop()
+        self._refresh_sidebar()  # full refresh when paused
 
     def _on_play_tick(self):
         if self.current_frame >= self.total_frames - 1:
             self._pause()
+            self._refresh_sidebar()  # full refresh on stop
             return
-        self._go_to_frame(self.current_frame + 1)
+        self._go_to_frame(self.current_frame + 1, lightweight=True)
 
     # ------------------------------------------------------------------
     # Undo / Redo
