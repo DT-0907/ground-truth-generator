@@ -379,6 +379,13 @@
             padding: 0 4px;
         }
         .roi-item .roi-delete:hover { color: #ff6b6b; }
+        .roi-item.roi-selected {
+            background: #2d5a3a;
+            border-left: 3px solid #4ecca3;
+        }
+        .track-item.roi-hidden {
+            opacity: 0.3;
+        }
         .roi-stats-detail {
             padding: 4px 8px 4px 26px;
             font-size: 11px;
@@ -564,6 +571,12 @@
         let playInterval = null;
         let currentFilter = 'all';
         let hasUnsavedChanges = false;
+        let selectedRoiIds = new Set();
+        let isDraggingBbox = false;
+        let dragStartVideo = null;
+        let dragOrigBbox = null;
+        let dragTrackId = null;
+        let frameReady = true;
 
         // Drawing state
         let isDrawMode = false;
@@ -679,6 +692,7 @@
             const img = new Image();
             img.onload = function() {
                 if (loadingFrameNum !== frameNum) return; // Stale request
+                frameReady = true;
 
                 loadingText.style.display = 'none';
                 frameImage.style.display = 'block';
@@ -708,7 +722,6 @@
         // ===== DRAWING =====
         function setDrawMode(enabled) {
             isDrawMode = enabled;
-            canvas.style.pointerEvents = enabled ? 'auto' : 'none';
             canvas.classList.toggle('drawing', enabled);
             document.getElementById('selectMode').classList.toggle('active', !enabled);
             document.getElementById('drawMode').classList.toggle('active', enabled);
@@ -753,10 +766,55 @@
                 }
                 return;
             }
-            if (!isDrawMode) return;
-            isDrawing = true;
-            drawStart = getCanvasCoords(e);
-            drawEnd = drawStart;
+
+            // Draw mode
+            if (isDrawMode) {
+                isDrawing = true;
+                drawStart = getCanvasCoords(e);
+                drawEnd = drawStart;
+                return;
+            }
+
+            // Select mode
+            const coords = getCanvasCoords(e);
+            const vCoords = canvasToVideo(coords.x, coords.y);
+
+            // If we have a selected track, check if clicking inside its bbox to drag
+            if (selectedTrackId !== null) {
+                const track = tracks.find(t => t.track_id === selectedTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        const [bx1, by1, bx2, by2] = fd.bbox;
+                        if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                            isDraggingBbox = true;
+                            dragTrackId = selectedTrackId;
+                            dragOrigBbox = [...fd.bbox];
+                            dragStartVideo = vCoords;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Click on any bbox to select it
+            let clickedTrackId = null;
+            for (const track of tracks) {
+                const fd = track.frames.find(f => f.frame === currentFrame);
+                if (!fd) continue;
+                const [bx1, by1, bx2, by2] = fd.bbox;
+                if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                    clickedTrackId = track.track_id;
+                }
+            }
+            if (clickedTrackId !== null) {
+                selectTrack(clickedTrackId);
+            } else {
+                selectedTrackId = null;
+                renderTracks(currentFilter);
+                updateActionButtons();
+                drawBoxes();
+            }
         });
 
         canvas.addEventListener('mousemove', e => {
@@ -767,9 +825,51 @@
                 return;
             }
             if (isRoiDrawMode) return;
-            if (!isDrawMode || !isDrawing) return;
-            drawEnd = getCanvasCoords(e);
-            drawBoxes();
+
+            // Bbox drag
+            if (isDraggingBbox && dragOrigBbox) {
+                const coords = getCanvasCoords(e);
+                const vCoords = canvasToVideo(coords.x, coords.y);
+                const dx = vCoords.x - dragStartVideo.x;
+                const dy = vCoords.y - dragStartVideo.y;
+                const track = tracks.find(t => t.track_id === dragTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        fd.bbox = [
+                            dragOrigBbox[0] + dx, dragOrigBbox[1] + dy,
+                            dragOrigBbox[2] + dx, dragOrigBbox[3] + dy
+                        ];
+                        drawBoxes();
+                    }
+                }
+                return;
+            }
+
+            // Draw mode
+            if (isDrawMode && isDrawing) {
+                drawEnd = getCanvasCoords(e);
+                drawBoxes();
+                return;
+            }
+
+            // Select mode: move cursor for bbox hover
+            if (!isDrawMode && !isRoiDrawMode && selectedTrackId !== null) {
+                const track = tracks.find(t => t.track_id === selectedTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        const coords = getCanvasCoords(e);
+                        const vCoords = canvasToVideo(coords.x, coords.y);
+                        const [bx1, by1, bx2, by2] = fd.bbox;
+                        if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                            canvas.style.cursor = 'move';
+                            return;
+                        }
+                    }
+                }
+                canvas.style.cursor = '';
+            }
         });
 
         canvas.addEventListener('mouseup', e => {
@@ -795,6 +895,17 @@
                 }
                 roiDrawStart = null;
                 roiDrawEnd = null;
+                drawBoxes();
+                return;
+            }
+            // Bbox drag end
+            if (isDraggingBbox) {
+                isDraggingBbox = false;
+                dragOrigBbox = null;
+                dragStartVideo = null;
+                dragTrackId = null;
+                hasUnsavedChanges = true;
+                saveState();
                 drawBoxes();
                 return;
             }
@@ -845,6 +956,18 @@
         });
 
         canvas.addEventListener('mouseleave', () => {
+            if (isDraggingBbox) {
+                const track = tracks.find(t => t.track_id === dragTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd && dragOrigBbox) fd.bbox = [...dragOrigBbox];
+                }
+                isDraggingBbox = false;
+                dragOrigBbox = null;
+                dragStartVideo = null;
+                dragTrackId = null;
+                drawBoxes();
+            }
             if (isDrawing) {
                 isDrawing = false;
                 drawStart = null;
@@ -1014,7 +1137,7 @@
                 canvas.classList.remove('roi-drawing');
                 document.getElementById('roiRectBtn').classList.remove('active');
                 document.getElementById('roiPolyBtn').classList.remove('active');
-                canvas.style.pointerEvents = isDrawMode ? 'auto' : 'none';
+                canvas.style.pointerEvents = 'auto';
                 modeIndicator.textContent = isDrawMode ? 'DRAW MODE - Click and drag' : 'Select Mode';
                 modeIndicator.classList.toggle('drawing', isDrawMode);
                 drawBoxes();
@@ -1066,6 +1189,7 @@
 
         function deleteRoi(roiId) {
             saveState();
+            selectedRoiIds.delete(roiId);
             rois = rois.filter(r => r.id !== roiId);
             renderRois();
             drawBoxes();
@@ -1083,7 +1207,8 @@
         }
 
         function pointInRect(px, py, p1, p2) {
-            return px >= p1.x && px <= p2.x && py >= p1.y && py <= p2.y;
+            return px >= Math.min(p1.x, p2.x) && px <= Math.max(p1.x, p2.x) &&
+                   py >= Math.min(p1.y, p2.y) && py <= Math.max(p1.y, p2.y);
         }
 
         function pointInPolygon(px, py, polygon) {
@@ -1096,6 +1221,23 @@
                 if (intersect) inside = !inside;
             }
             return inside;
+        }
+
+        function trackInSelectedRois(track) {
+            if (selectedRoiIds.size === 0) return true;
+            const activeRois = rois.filter(r => selectedRoiIds.has(r.id));
+            for (const roi of activeRois) {
+                for (const f of track.frames) {
+                    const cx = (f.bbox[0] + f.bbox[2]) / 2;
+                    const cy = (f.bbox[1] + f.bbox[3]) / 2;
+                    if (roi.type === 'rect') {
+                        if (pointInRect(cx, cy, roi.points[0], roi.points[1])) return true;
+                    } else if (roi.type === 'polygon') {
+                        if (pointInPolygon(cx, cy, roi.points)) return true;
+                    }
+                }
+            }
+            return false;
         }
 
         function computeRoiStats(roi) {
@@ -1135,14 +1277,28 @@
                 const classBreakdown = Object.entries(stats.byClass)
                     .map(([cls, count]) => `${cls}: ${count}`)
                     .join(', ');
+                const isActive = selectedRoiIds.has(roi.id);
                 const item = document.createElement('div');
-                item.className = 'roi-item';
+                item.className = 'roi-item' + (isActive ? ' roi-selected' : '');
+                item.style.cursor = 'pointer';
                 item.innerHTML = `
                     <span class="roi-color" style="background:${roi.color}"></span>
-                    <span class="roi-name" onclick="renameRoi(${roi.id})" title="Click to rename">${roi.name}</span>
+                    <span class="roi-name">${roi.name}</span>
                     <span class="roi-stats">${stats.total} vehicles</span>
-                    <span class="roi-delete" onclick="deleteRoi(${roi.id})" title="Delete ROI">&times;</span>
+                    <span class="roi-delete" title="Delete ROI">&times;</span>
                 `;
+                item.querySelector('.roi-name').onclick = (e) => { e.stopPropagation(); renameRoi(roi.id); };
+                item.querySelector('.roi-delete').onclick = (e) => { e.stopPropagation(); deleteRoi(roi.id); };
+                item.onclick = () => {
+                    if (selectedRoiIds.has(roi.id)) {
+                        selectedRoiIds.delete(roi.id);
+                    } else {
+                        selectedRoiIds.add(roi.id);
+                    }
+                    renderRois();
+                    renderTracks(currentFilter);
+                    drawBoxes();
+                };
                 list.appendChild(item);
                 if (classBreakdown) {
                     const detail = document.createElement('div');
@@ -1167,6 +1323,8 @@
             for (const track of tracks) {
                 const frameData = track.frames.find(f => f.frame === currentFrame);
                 if (!frameData) continue;
+                // ROI filter: skip tracks outside selected ROIs
+                if (selectedRoiIds.size > 0 && !trackInSelectedRois(track)) continue;
 
                 const [x1, y1, x2, y2] = frameData.bbox;
                 const sx1 = x1 * scaleX;
@@ -1328,6 +1486,8 @@
                 if (track.needs_review) div.classList.add('needs-review');
                 if (track.track_id === selectedTrackId) div.classList.add('selected');
                 if (isVisible) div.classList.add('active-frame');
+                const outsideRoi = selectedRoiIds.size > 0 && !trackInSelectedRois(track);
+                if (outsideRoi) div.classList.add('roi-hidden');
 
                 const conf = track.avg_confidence ? Math.round(track.avg_confidence * 100) : '?';
                 div.innerHTML = `
@@ -1573,6 +1733,7 @@
                 resolution: [videoWidth, videoHeight],
                 tracks: tracks,
                 rois: rois,
+                active_roi_ids: [...selectedRoiIds],
                 saved_at: new Date().toISOString()
             };
 
@@ -1624,18 +1785,26 @@
             this.classList.toggle('active', isPlaying);
 
             if (isPlaying) {
-                playInterval = setInterval(() => {
+                function playStep() {
+                    if (!isPlaying) return;
                     if (currentFrame >= totalFrames - 1) {
                         isPlaying = false;
                         document.getElementById('playBtn').textContent = 'Play';
                         document.getElementById('playBtn').classList.remove('active');
-                        clearInterval(playInterval);
-                    } else {
+                        return;
+                    }
+                    if (frameReady) {
+                        frameReady = false;
                         loadFrame(currentFrame + 1);
                     }
-                }, 100);
+                    playInterval = requestAnimationFrame(playStep);
+                }
+                playInterval = requestAnimationFrame(playStep);
             } else {
-                clearInterval(playInterval);
+                if (playInterval) {
+                    cancelAnimationFrame(playInterval);
+                    playInterval = null;
+                }
             }
         };
 

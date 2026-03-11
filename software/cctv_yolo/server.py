@@ -642,6 +642,46 @@ def export_labeled_images(session_id, sample_rate=1):
 
     tracks = data.get("tracks", [])
 
+    # Filter tracks by active ROIs if set
+    active_roi_ids = data.get("active_roi_ids", [])
+    rois = data.get("rois", [])
+    if active_roi_ids and rois:
+        active_rois = [r for r in rois if r.get("id") in active_roi_ids]
+        if active_rois:
+            filtered = []
+            for track in tracks:
+                for roi in active_rois:
+                    pts = roi.get("points", [])
+                    in_roi = False
+                    for fd in track.get("frames", []):
+                        bbox = fd.get("bbox", [0, 0, 0, 0])
+                        cx = (bbox[0] + bbox[2]) / 2
+                        cy = (bbox[1] + bbox[3]) / 2
+                        if roi.get("type") == "rect" and len(pts) >= 2:
+                            x1 = min(pts[0]["x"], pts[1]["x"])
+                            y1 = min(pts[0]["y"], pts[1]["y"])
+                            x2 = max(pts[0]["x"], pts[1]["x"])
+                            y2 = max(pts[0]["y"], pts[1]["y"])
+                            if x1 <= cx <= x2 and y1 <= cy <= y2:
+                                in_roi = True
+                                break
+                        elif roi.get("type") == "polygon" and len(pts) >= 3:
+                            inside = False
+                            j = len(pts) - 1
+                            for i in range(len(pts)):
+                                xi, yi = pts[i]["x"], pts[i]["y"]
+                                xj, yj = pts[j]["x"], pts[j]["y"]
+                                if ((yi > cy) != (yj > cy)) and (cx < (xj - xi) * (cy - yi) / (yj - yi) + xi):
+                                    inside = not inside
+                                j = i
+                            if inside:
+                                in_roi = True
+                                break
+                    if in_roi:
+                        filtered.append(track)
+                        break
+            tracks = filtered
+
     frame_detections = {}
     for track in tracks:
         cls = track.get("class", "vehicle")

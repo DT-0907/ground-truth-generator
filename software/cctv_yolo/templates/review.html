@@ -391,6 +391,10 @@
             padding: 0 4px;
         }
         .roi-item .roi-delete:hover { color: #ff6b6b; }
+        .roi-item.roi-selected {
+            background: #2d5a3a;
+            border-left: 3px solid #4ecca3;
+        }
         .roi-stats-detail {
             padding: 4px 8px 4px 26px;
             font-size: 11px;
@@ -609,6 +613,12 @@
 
         // ROI filter
         let roiFilterActive = false;
+        let selectedRoiIds = new Set();
+        let isDraggingBbox = false;
+        let dragStartVideo = null;
+        let dragOrigBbox = null;
+        let dragTrackId = null;
+        let frameReady = true;
 
         // Undo/Redo
         let undoStack = [];
@@ -720,6 +730,7 @@
 
             // Try cache first
             if (frameCache.has(frameNum)) {
+                frameReady = true;
                 const cached = frameCache.get(frameNum);
                 loadingText.style.display = 'none';
                 frameImage.style.display = 'block';
@@ -740,6 +751,7 @@
                 const img = new Image();
                 img.onload = function() {
                     if (loadingFrameNum !== frameNum) return; // Stale request
+                    frameReady = true;
                     frameCache.set(frameNum, img);
 
                     loadingText.style.display = 'none';
@@ -801,7 +813,6 @@
         // ===== DRAWING =====
         function setDrawMode(enabled) {
             isDrawMode = enabled;
-            canvas.style.pointerEvents = enabled ? 'auto' : 'none';
             canvas.classList.toggle('drawing', enabled);
             document.getElementById('selectMode').classList.toggle('active', !enabled);
             document.getElementById('drawMode').classList.toggle('active', enabled);
@@ -890,26 +901,56 @@
                 return;
             }
 
-            // Select mode: check resize handles first
-            if (!isDrawMode && selectedTrackId !== null) {
+            // Select mode
+            const coords = getCanvasCoords(e);
+            const vCoords = canvasToVideo(coords.x, coords.y);
+
+            // Check resize handles first (selected track)
+            if (selectedTrackId !== null) {
                 const track = tracks.find(t => t.track_id === selectedTrackId);
                 if (track) {
                     const fd = track.frames.find(f => f.frame === currentFrame);
                     if (fd) {
                         const handles = getResizeHandles(fd.bbox);
-                        const coords = getCanvasCoords(e);
                         const hit = hitTestHandle(coords.x, coords.y, handles);
                         if (hit) {
                             isResizing = true;
                             resizeHandle = hit;
                             resizeTrackId = selectedTrackId;
                             resizeOrigBbox = [...fd.bbox];
-                            resizeStartMouse = canvasToVideo(coords.x, coords.y);
-                            canvas.style.pointerEvents = 'auto';
+                            resizeStartMouse = vCoords;
+                            return;
+                        }
+                        // Check if clicking inside selected bbox to drag
+                        const [bx1, by1, bx2, by2] = fd.bbox;
+                        if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                            isDraggingBbox = true;
+                            dragTrackId = selectedTrackId;
+                            dragOrigBbox = [...fd.bbox];
+                            dragStartVideo = vCoords;
                             return;
                         }
                     }
                 }
+            }
+
+            // Click on any bbox to select it
+            let clickedTrackId = null;
+            for (const track of tracks) {
+                const fd = track.frames.find(f => f.frame === currentFrame);
+                if (!fd) continue;
+                const [bx1, by1, bx2, by2] = fd.bbox;
+                if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                    clickedTrackId = track.track_id;
+                }
+            }
+            if (clickedTrackId !== null) {
+                selectTrack(clickedTrackId);
+            } else {
+                selectedTrackId = null;
+                renderTracks(currentFilter);
+                updateActionButtons();
+                drawBoxes();
             }
         });
 
@@ -921,6 +962,26 @@
                 return;
             }
             if (isRoiDrawMode) return;
+
+            // Bbox drag
+            if (isDraggingBbox && dragOrigBbox) {
+                const coords = getCanvasCoords(e);
+                const vCoords = canvasToVideo(coords.x, coords.y);
+                const dx = vCoords.x - dragStartVideo.x;
+                const dy = vCoords.y - dragStartVideo.y;
+                const track = tracks.find(t => t.track_id === dragTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd) {
+                        fd.bbox = [
+                            dragOrigBbox[0] + dx, dragOrigBbox[1] + dy,
+                            dragOrigBbox[2] + dx, dragOrigBbox[3] + dy
+                        ];
+                        drawBoxes();
+                    }
+                }
+                return;
+            }
 
             // Resize
             if (isResizing) {
@@ -946,29 +1007,36 @@
                 return;
             }
 
-            // Select mode: update cursor for resize handles
-            if (!isDrawMode && !isRoiDrawMode && selectedTrackId !== null) {
-                const track = tracks.find(t => t.track_id === selectedTrackId);
-                if (track) {
-                    const fd = track.frames.find(f => f.frame === currentFrame);
-                    if (fd) {
-                        const handles = getResizeHandles(fd.bbox);
-                        const coords = getCanvasCoords(e);
-                        const hit = hitTestHandle(coords.x, coords.y, handles);
-                        if (hit) {
-                            const cursors = {
-                                tl: 'nwse-resize', tc: 'ns-resize', tr: 'nesw-resize',
-                                ml: 'ew-resize', mr: 'ew-resize',
-                                bl: 'nesw-resize', bc: 'ns-resize', br: 'nwse-resize'
-                            };
-                            canvas.style.cursor = cursors[hit];
-                            canvas.style.pointerEvents = 'auto';
-                            return;
+            // Select mode: update cursor
+            if (!isDrawMode && !isRoiDrawMode) {
+                if (selectedTrackId !== null) {
+                    const track = tracks.find(t => t.track_id === selectedTrackId);
+                    if (track) {
+                        const fd = track.frames.find(f => f.frame === currentFrame);
+                        if (fd) {
+                            const handles = getResizeHandles(fd.bbox);
+                            const coords = getCanvasCoords(e);
+                            const hit = hitTestHandle(coords.x, coords.y, handles);
+                            if (hit) {
+                                const cursors = {
+                                    tl: 'nwse-resize', tc: 'ns-resize', tr: 'nesw-resize',
+                                    ml: 'ew-resize', mr: 'ew-resize',
+                                    bl: 'nesw-resize', bc: 'ns-resize', br: 'nwse-resize'
+                                };
+                                canvas.style.cursor = cursors[hit];
+                                return;
+                            }
+                            // Move cursor when hovering selected bbox
+                            const vCoords = canvasToVideo(coords.x, coords.y);
+                            const [bx1, by1, bx2, by2] = fd.bbox;
+                            if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                                canvas.style.cursor = 'move';
+                                return;
+                            }
                         }
                     }
                 }
                 canvas.style.cursor = '';
-                if (!isDrawMode && !isRoiDrawMode) canvas.style.pointerEvents = 'none';
             }
         });
 
@@ -999,6 +1067,18 @@
                 return;
             }
 
+            // Bbox drag end
+            if (isDraggingBbox) {
+                isDraggingBbox = false;
+                dragOrigBbox = null;
+                dragStartVideo = null;
+                dragTrackId = null;
+                hasUnsavedChanges = true;
+                saveState();
+                drawBoxes();
+                return;
+            }
+
             // Resize finish
             if (isResizing) {
                 saveState();
@@ -1008,7 +1088,6 @@
                 resizeOrigBbox = null;
                 resizeStartMouse = null;
                 canvas.style.cursor = '';
-                if (!isDrawMode && !isRoiDrawMode) canvas.style.pointerEvents = 'none';
                 drawBoxes();
                 return;
             }
@@ -1071,6 +1150,18 @@
                 roiDrawing = false;
                 roiDrawStart = null;
                 roiDrawEnd = null;
+                drawBoxes();
+            }
+            if (isDraggingBbox) {
+                const track = tracks.find(t => t.track_id === dragTrackId);
+                if (track) {
+                    const fd = track.frames.find(f => f.frame === currentFrame);
+                    if (fd && dragOrigBbox) fd.bbox = [...dragOrigBbox];
+                }
+                isDraggingBbox = false;
+                dragOrigBbox = null;
+                dragStartVideo = null;
+                dragTrackId = null;
                 drawBoxes();
             }
             if (isResizing) {
@@ -1233,7 +1324,7 @@
                 canvas.classList.remove('roi-drawing');
                 document.getElementById('roiRectBtn').classList.remove('active');
                 document.getElementById('roiPolyBtn').classList.remove('active');
-                canvas.style.pointerEvents = isDrawMode ? 'auto' : 'none';
+                canvas.style.pointerEvents = 'auto';
                 modeIndicator.textContent = isDrawMode ? 'DRAW MODE - Click and drag' : 'Select Mode';
                 modeIndicator.classList.toggle('drawing', isDrawMode);
                 drawBoxes();
@@ -1285,6 +1376,7 @@
 
         function deleteRoi(roiId) {
             saveState();
+            selectedRoiIds.delete(roiId);
             rois = rois.filter(r => r.id !== roiId);
             renderRois();
             drawBoxes();
@@ -1318,9 +1410,10 @@
             return inside;
         }
 
-        function trackInAnyRoi(track) {
-            if (rois.length === 0) return true;
-            for (const roi of rois) {
+        function trackInSelectedRois(track) {
+            if (selectedRoiIds.size === 0) return true;
+            const activeRois = rois.filter(r => selectedRoiIds.has(r.id));
+            for (const roi of activeRois) {
                 for (const f of track.frames) {
                     const cx = (f.bbox[0] + f.bbox[2]) / 2;
                     const cy = (f.bbox[1] + f.bbox[3]) / 2;
@@ -1359,9 +1452,12 @@
         function renderRois() {
             const list = document.getElementById('roiList');
             const countEl = document.getElementById('roiCount');
-            list.innerHTML = '';
+            list.textContent = '';
             if (rois.length === 0) {
-                list.innerHTML = '<div style="font-size:11px;color:#555;">No ROIs. Use ROI Rect/Poly buttons to draw.</div>';
+                const emptyMsg = document.createElement('div');
+                emptyMsg.style.cssText = 'font-size:11px;color:#555;';
+                emptyMsg.textContent = 'No ROIs. Use ROI Rect/Poly buttons to draw.';
+                list.appendChild(emptyMsg);
                 countEl.textContent = '';
                 return;
             }
@@ -1371,14 +1467,44 @@
                 const classBreakdown = Object.entries(stats.byClass)
                     .map(([cls, count]) => `${cls}: ${count}`)
                     .join(', ');
+                const isActive = selectedRoiIds.has(roi.id);
                 const item = document.createElement('div');
-                item.className = 'roi-item';
-                item.innerHTML = `
-                    <span class="roi-color" style="background:${roi.color}"></span>
-                    <span class="roi-name" onclick="renameRoi(${roi.id})" title="Click to rename">${roi.name}</span>
-                    <span class="roi-stats">${stats.total} vehicles</span>
-                    <span class="roi-delete" onclick="deleteRoi(${roi.id})" title="Delete ROI">&times;</span>
-                `;
+                item.className = 'roi-item' + (isActive ? ' roi-selected' : '');
+                item.style.cursor = 'pointer';
+
+                const colorSpan = document.createElement('span');
+                colorSpan.className = 'roi-color';
+                colorSpan.style.background = roi.color;
+                item.appendChild(colorSpan);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'roi-name';
+                nameSpan.textContent = roi.name;
+                item.appendChild(nameSpan);
+
+                const statsSpan = document.createElement('span');
+                statsSpan.className = 'roi-stats';
+                statsSpan.textContent = `${stats.total} vehicles`;
+                item.appendChild(statsSpan);
+
+                const deleteSpan = document.createElement('span');
+                deleteSpan.className = 'roi-delete';
+                deleteSpan.title = 'Delete ROI';
+                deleteSpan.textContent = '\u00d7';
+                item.appendChild(deleteSpan);
+
+                nameSpan.onclick = (e) => { e.stopPropagation(); renameRoi(roi.id); };
+                deleteSpan.onclick = (e) => { e.stopPropagation(); deleteRoi(roi.id); };
+                item.onclick = () => {
+                    if (selectedRoiIds.has(roi.id)) {
+                        selectedRoiIds.delete(roi.id);
+                    } else {
+                        selectedRoiIds.add(roi.id);
+                    }
+                    renderRois();
+                    renderTracks(currentFilter);
+                    drawBoxes();
+                };
                 list.appendChild(item);
                 if (classBreakdown) {
                     const detail = document.createElement('div');
@@ -1413,11 +1539,8 @@
                 const color = classColors[track.class] || classColors.unknown;
                 const isSelected = track.track_id === selectedTrackId;
 
-                // ROI filter: dim tracks outside ROIs
-                const outsideRoi = roiFilterActive && rois.length > 0 && !trackInAnyRoi(track);
-                const alpha = outsideRoi ? 0.3 : 1.0;
-
-                ctx.globalAlpha = alpha;
+                // ROI filter: skip tracks outside selected ROIs
+                if (selectedRoiIds.size > 0 && !trackInSelectedRois(track)) continue;
 
                 // Box - dashed for interpolated frames
                 const isInterpolated = frameData.interpolated === true;
@@ -1456,8 +1579,6 @@
                         ctx.strokeRect(pos.x, pos.y, HANDLE_SIZE, HANDLE_SIZE);
                     }
                 }
-
-                ctx.globalAlpha = 1.0;
             }
 
             // Draw ROIs
@@ -1573,7 +1694,7 @@
 
             for (const track of filtered) {
                 const isVisible = currentFrame >= track.start_frame && currentFrame <= track.end_frame;
-                const outsideRoi = roiFilterActive && rois.length > 0 && !trackInAnyRoi(track);
+                const outsideRoi = selectedRoiIds.size > 0 && !trackInSelectedRois(track);
 
                 const div = document.createElement('div');
                 div.className = 'track-item';
@@ -1621,11 +1742,6 @@
 
             updateActionButtons();
             drawBoxes();
-
-            // Enable pointer events on canvas for resize handles in select mode
-            if (!isDrawMode && !isRoiDrawMode && selectedTrackId !== null) {
-                canvas.style.pointerEvents = 'auto';
-            }
         }
 
         function updateActionButtons() {
@@ -1823,6 +1939,7 @@
                 resolution: [videoWidth, videoHeight],
                 tracks: tracks,
                 rois: rois,
+                active_roi_ids: [...selectedRoiIds],
                 saved_at: new Date().toISOString()
             };
 
@@ -1868,38 +1985,26 @@
         document.getElementById('prev10').onclick = () => loadFrame(currentFrame - 10);
         document.getElementById('next10').onclick = () => loadFrame(currentFrame + 10);
 
-        // Improved playback using requestAnimationFrame
         document.getElementById('playBtn').onclick = function() {
             isPlaying = !isPlaying;
             this.textContent = isPlaying ? 'Pause' : 'Play';
             this.classList.toggle('active', isPlaying);
 
             if (isPlaying) {
-                const targetInterval = 1000 / (fps || 25);  // ms per frame
-                let lastTime = performance.now();
-                let accumulator = 0;
-
-                function playStep(timestamp) {
+                function playStep() {
                     if (!isPlaying) return;
-
-                    accumulator += timestamp - lastTime;
-                    lastTime = timestamp;
-
-                    // Advance frames based on elapsed time
-                    while (accumulator >= targetInterval) {
-                        accumulator -= targetInterval;
-                        if (currentFrame >= totalFrames - 1) {
-                            isPlaying = false;
-                            document.getElementById('playBtn').textContent = 'Play';
-                            document.getElementById('playBtn').classList.remove('active');
-                            return;
-                        }
+                    if (currentFrame >= totalFrames - 1) {
+                        isPlaying = false;
+                        document.getElementById('playBtn').textContent = 'Play';
+                        document.getElementById('playBtn').classList.remove('active');
+                        return;
+                    }
+                    if (frameReady) {
+                        frameReady = false;
                         loadFrame(currentFrame + 1);
                     }
-
                     playTimer = requestAnimationFrame(playStep);
                 }
-
                 playTimer = requestAnimationFrame(playStep);
             } else {
                 if (playTimer) {
@@ -1929,7 +2034,13 @@
 
         // ROI filter toggle
         document.getElementById('roiFilterCheck').onchange = function() {
-            roiFilterActive = this.checked;
+            if (this.checked) {
+                // Select all ROIs
+                rois.forEach(r => selectedRoiIds.add(r.id));
+            } else {
+                selectedRoiIds.clear();
+            }
+            renderRois();
             renderTracks(currentFilter);
             drawBoxes();
         };

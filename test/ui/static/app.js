@@ -19,6 +19,7 @@ let overlayCtx = null;
 
 let isPlaying = false;
 let playTimer = null;
+let frameReady = true;
 
 // Bbox resize state
 let resizeHandle = null;   // which handle is being dragged
@@ -30,6 +31,7 @@ let isDraggingBbox = false; // move whole bbox
 // ROI filter
 let roiFilterEnabled = false;
 let rois = [];              // loaded from tracks data
+let selectedRoiIds = new Set();
 
 // Vehicle class colors
 const CLASS_COLORS = {
@@ -111,10 +113,12 @@ function loadTracks() {
 function loadFrame(frameNum) {
     frameNum = Math.max(0, Math.min(frameNum, totalFrames - 1));
     currentFrame = frameNum;
+    frameReady = false;
     updateFrameInfo();
 
     const img = new Image();
     img.onload = () => {
+        frameReady = true;
         frameCtx.drawImage(img, 0, 0, frameCanvas.width, frameCanvas.height);
         updateOverlay();
     };
@@ -132,17 +136,23 @@ function playVideo() {
     if (isPlaying) return;
     isPlaying = true;
     document.getElementById('playPause').textContent = 'Pause';
-    const interval = 1000 / videoFps;
-    playTimer = setInterval(() => {
+
+    function playStep() {
+        if (!isPlaying) return;
         if (currentFrame >= totalFrames - 1) { pauseVideo(); return; }
-        loadFrame(currentFrame + 1);
-    }, interval);
+        if (frameReady) {
+            frameReady = false;
+            loadFrame(currentFrame + 1);
+        }
+        playTimer = requestAnimationFrame(playStep);
+    }
+    playTimer = requestAnimationFrame(playStep);
 }
 
 function pauseVideo() {
     isPlaying = false;
     document.getElementById('playPause').textContent = 'Play';
-    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+    if (playTimer) { cancelAnimationFrame(playTimer); playTimer = null; }
 }
 
 // ---------------------------------------------------------------
@@ -183,8 +193,9 @@ function updateOverlay() {
 
     // Draw ROIs
     rois.forEach(roi => {
-        overlayCtx.strokeStyle = 'rgba(78, 204, 163, 0.7)';
-        overlayCtx.lineWidth = 2;
+        const isSelected = selectedRoiIds.has(roi.id || roi.name);
+        overlayCtx.strokeStyle = isSelected ? 'rgba(78, 204, 163, 1.0)' : 'rgba(78, 204, 163, 0.4)';
+        overlayCtx.lineWidth = isSelected ? 3 : 2;
         overlayCtx.setLineDash([6, 4]);
         const pts = roi.points || [];
         if (roi.type === 'rect' && pts.length >= 2) {
@@ -226,7 +237,9 @@ function drawResizeHandles(x1, y1, x2, y2) {
 // ---------------------------------------------------------------
 function getFilteredTracks() {
     let tracks = tracksData?.tracks || [];
-    if (roiFilterEnabled && rois.length > 0) {
+    if (selectedRoiIds.size > 0) {
+        tracks = tracks.filter(track => trackInSelectedRois(track));
+    } else if (roiFilterEnabled && rois.length > 0) {
         tracks = tracks.filter(track => {
             return track.frames?.some(fd => {
                 if (!fd.bbox) return false;
@@ -257,6 +270,25 @@ function bboxInRoi(bbox, roi) {
         return inside;
     }
     return false;
+}
+
+function trackInSelectedRois(track) {
+    if (selectedRoiIds.size === 0) return true;
+    const activeRois = rois.filter(r => selectedRoiIds.has(r.id || r.name));
+    return track.frames?.some(fd => {
+        if (!fd.bbox) return false;
+        return activeRois.some(roi => bboxInRoi(fd.bbox, roi));
+    });
+}
+
+function distToSegment(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((p.x - a.x) ** 2 + (p.y - a.y) ** 2);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const projX = a.x + t * dx, projY = a.y + t * dy;
+    return Math.sqrt((p.x - projX) ** 2 + (p.y - projY) ** 2);
 }
 
 // ---------------------------------------------------------------
@@ -297,6 +329,46 @@ function setupOverlayInteraction() {
                     resizeStart = pos;
                     e.preventDefault();
                     return;
+                }
+            }
+        }
+
+        // Check if clicked on an ROI to toggle selection
+        for (const roi of rois) {
+            const pts = roi.points || [];
+            const roiId = roi.id || roi.name;
+            if (roi.type === 'rect' && pts.length >= 2) {
+                const x1 = Math.min(pts[0].x, pts[1].x), y1 = Math.min(pts[0].y, pts[1].y);
+                const x2 = Math.max(pts[0].x, pts[1].x), y2 = Math.max(pts[0].y, pts[1].y);
+                // Only check the border area (within 10px of the edge)
+                const margin = 10;
+                const onBorder = (pos.x >= x1 - margin && pos.x <= x2 + margin && pos.y >= y1 - margin && pos.y <= y2 + margin) &&
+                    !(pos.x >= x1 + margin && pos.x <= x2 - margin && pos.y >= y1 + margin && pos.y <= y2 - margin);
+                if (onBorder) {
+                    if (selectedRoiIds.has(roiId)) {
+                        selectedRoiIds.delete(roiId);
+                    } else {
+                        selectedRoiIds.add(roiId);
+                    }
+                    renderTracksList();
+                    updateOverlay();
+                    return;
+                }
+            } else if (pts.length >= 3) {
+                // For polygons, check if near any edge
+                for (let i = 0; i < pts.length; i++) {
+                    const p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+                    const dist = distToSegment(pos, p1, p2);
+                    if (dist < 10) {
+                        if (selectedRoiIds.has(roiId)) {
+                            selectedRoiIds.delete(roiId);
+                        } else {
+                            selectedRoiIds.add(roiId);
+                        }
+                        renderTracksList();
+                        updateOverlay();
+                        return;
+                    }
                 }
             }
         }
@@ -492,6 +564,11 @@ function setupControls() {
     if (roiCheck) {
         roiCheck.addEventListener('change', () => {
             roiFilterEnabled = roiCheck.checked;
+            if (roiCheck.checked) {
+                rois.forEach(r => selectedRoiIds.add(r.id || r.name));
+            } else {
+                selectedRoiIds.clear();
+            }
             renderTracksList();
             updateOverlay();
         });
@@ -700,6 +777,9 @@ function performAction(action, trackId, data = {}) {
 // ---------------------------------------------------------------
 function saveAnnotations() {
     if (!tracksData) { showStatus('No tracks to save', 'error'); return; }
+
+    // Include active ROI filter in saved data
+    tracksData.active_roi_ids = [...selectedRoiIds];
 
     fetch(`/api/session/${currentSession}/tracks`, {
         method: 'POST',
