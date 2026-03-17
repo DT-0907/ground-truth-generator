@@ -47,7 +47,9 @@ CORRECTIONS_DIR = DATA_DIR / "corrections"
 EXPORTS_DIR = DATA_DIR / "exports"
 MODELS_DIR = _DATA_ROOT / "models"
 
-for _d in [VIDEOS_DIR, TRACKS_DIR, CORRECTIONS_DIR, EXPORTS_DIR, MODELS_DIR]:
+CONFIG_DIR = _DATA_ROOT / "config"
+
+for _d in [VIDEOS_DIR, TRACKS_DIR, CORRECTIONS_DIR, EXPORTS_DIR, MODELS_DIR, CONFIG_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 NAS_CONFIG_FILE = _DATA_ROOT / "config" / "nas.json"
@@ -861,6 +863,47 @@ def api_models():
     builtins = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"]
     all_models = list(dict.fromkeys(builtins + local_models))  # dedup preserving order
     return jsonify({"models": all_models})
+
+
+@app.route("/api/models/upload", methods=["POST"])
+def upload_model():
+    """Upload a custom YOLO model file."""
+    if "model" not in request.files:
+        return jsonify({"error": "No model file provided"}), 400
+    file = request.files["model"]
+    if not file.filename or not file.filename.endswith(".pt"):
+        return jsonify({"error": "File must be a .pt model file"}), 400
+    dest = MODELS_DIR / file.filename
+    file.save(str(dest))
+    return jsonify({"success": True, "name": file.filename, "message": f"Model '{file.filename}' uploaded"})
+
+
+@app.route("/api/global-roi", methods=["GET"])
+def get_global_roi():
+    """Get the global processing ROI."""
+    roi_file = DATA_DIR / "config" / "global_roi.json"
+    if roi_file.exists():
+        try:
+            with open(roi_file, "r") as f:
+                return jsonify(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return jsonify(None)
+
+
+@app.route("/api/global-roi", methods=["POST"])
+def set_global_roi():
+    """Set or clear the global processing ROI."""
+    config_dir = DATA_DIR / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    roi_file = config_dir / "global_roi.json"
+    data = request.get_json(silent=True)
+    if data is None or data == {}:
+        roi_file.unlink(missing_ok=True)
+        return jsonify({"success": True, "message": "Global ROI cleared"})
+    with open(roi_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return jsonify({"success": True, "message": "Global ROI saved"})
 
 
 # ---------------------------------------------------------------------------

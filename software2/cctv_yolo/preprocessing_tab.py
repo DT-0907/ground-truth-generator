@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QMessageBox,
     QFileDialog,
+    QCheckBox,
 )
 
 from cctv_yolo.processing import ProcessingWorker, ExportWorker
@@ -274,6 +275,10 @@ class PreprocessingTab(QWidget):
         self._selected_session_id = None  # currently selected video for preview
         self._current_roi = None  # ROI dict for the selected video
         self._setup_ui()
+        # Restore global ROI state
+        self._global_roi = self.data_manager.get_global_processing_roi()
+        if self._global_roi:
+            self.chk_global_roi.setChecked(True)
         self._populate_models()
         self.refresh()
 
@@ -334,6 +339,14 @@ class PreprocessingTab(QWidget):
         self.conf_slider.valueChanged.connect(self._on_conf_slider_changed)
         model_row.addWidget(self.conf_slider)
         model_row.addWidget(self.lbl_conf_value)
+
+        model_row.addSpacing(20)
+
+        self.chk_global_roi = QCheckBox("Use Global ROI")
+        self.chk_global_roi.setStyleSheet(f"color: {TEXT}; font-size: 12px;")
+        self.chk_global_roi.setToolTip("Apply a single ROI to all videos during processing")
+        self.chk_global_roi.toggled.connect(self._on_global_roi_toggled)
+        model_row.addWidget(self.chk_global_roi)
 
         model_row.addStretch()
         layout.addLayout(model_row)
@@ -668,28 +681,39 @@ class PreprocessingTab(QWidget):
         self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
 
     def _on_roi_clear(self):
-        """Clear the ROI for the selected video."""
+        """Clear the ROI for the selected video or global ROI."""
         self._current_roi = None
-        if self._selected_session_id:
+        if self.chk_global_roi.isChecked():
+            self._global_roi = None
+            self.data_manager.set_global_processing_roi(None)
+            self.roi_status.setText("Global ROI cleared. Detections from full frame will be used.")
+        elif self._selected_session_id:
             self.data_manager.set_processing_roi(self._selected_session_id, None)
+            self.roi_status.setText("No ROI set. Detections from full frame will be used.")
         self._apply_roi_to_canvas()
-        self.roi_status.setText("No ROI set. Detections from full frame will be used.")
 
     def _save_and_display_roi(self):
         """Save the current ROI and update the canvas overlay."""
-        if self._selected_session_id and self._current_roi:
-            self.data_manager.set_processing_roi(
-                self._selected_session_id, self._current_roi
-            )
+        if self._current_roi:
+            if self.chk_global_roi.isChecked():
+                # Save as global ROI
+                self._global_roi = self._current_roi
+                self.data_manager.set_global_processing_roi(self._current_roi)
+            elif self._selected_session_id:
+                # Save as per-video ROI
+                self.data_manager.set_processing_roi(
+                    self._selected_session_id, self._current_roi
+                )
         self._apply_roi_to_canvas()
 
         # Update status label
         if self._current_roi:
             roi_type = self._current_roi["type"]
             n_pts = len(self._current_roi["points"])
+            scope = "all videos (global)" if self.chk_global_roi.isChecked() else "this video"
             self.roi_status.setText(
                 f"ROI set ({roi_type}, {n_pts} points). "
-                f"Only detections inside the ROI will be kept during processing."
+                f"Only detections inside the ROI will be kept for {scope}."
             )
 
     def _apply_roi_to_canvas(self):
@@ -702,6 +726,21 @@ class PreprocessingTab(QWidget):
         else:
             self.preview_canvas.rois = []
         self.preview_canvas.update()
+
+    def _on_global_roi_toggled(self, checked):
+        """Toggle global ROI usage."""
+        if checked:
+            if self._global_roi:
+                self.roi_status.setText("Global ROI active. This ROI will be used for all videos.")
+            else:
+                self.roi_status.setText("No global ROI set. Draw a ROI on any video preview to set it as global.")
+        else:
+            if self._selected_session_id:
+                roi = self.data_manager.get_processing_roi(self._selected_session_id)
+                if roi:
+                    self.roi_status.setText("Per-video ROI active.")
+                else:
+                    self.roi_status.setText("No ROI set. Detections from full frame will be used.")
 
     # ------------------------------------------------------------------
     # Refresh / populate
@@ -951,8 +990,11 @@ class PreprocessingTab(QWidget):
         model = self.model_combo.currentText()
         conf = self.conf_slider.value() / 100.0
 
-        # Load saved ROI for this session (if any)
-        processing_roi = self.data_manager.get_processing_roi(session_id)
+        # Load ROI: global ROI takes precedence when enabled
+        if self.chk_global_roi.isChecked() and self._global_roi:
+            processing_roi = self._global_roi
+        else:
+            processing_roi = self.data_manager.get_processing_roi(session_id)
 
         self.data_manager.set_processing_status(session_id, "processing", progress=0)
 

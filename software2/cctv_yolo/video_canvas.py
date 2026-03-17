@@ -46,6 +46,7 @@ class VideoCanvas(QWidget):
     roi_polygon_drawn = Signal(list)    # list of {x, y} dicts in video coords
     frame_clicked = Signal(int, int)    # click position in video coords
     bbox_resized = Signal(list)         # [x1, y1, x2, y2] in video coords
+    bbox_moved = Signal(list)           # [x1, y1, x2, y2] in video coords (after drag)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -60,6 +61,9 @@ class VideoCanvas(QWidget):
         self._video_height = 0
         self._total_frames = 0
         self._last_frame_read = -1    # tracks cap position for sequential read optimization
+        self._frame_cache = {}           # frame_num -> QPixmap
+        self._frame_cache_order = []     # LRU order
+        self._frame_cache_max = 60       # cache up to 60 frames
         self._display_rect = QRect()  # where the frame is drawn on widget
 
         # Track overlay data (set from outside)
@@ -81,6 +85,12 @@ class VideoCanvas(QWidget):
         self._resize_handle = None       # which handle is being dragged (e.g. 'tl')
         self._resize_orig_bbox = None    # original bbox in video coords [x1,y1,x2,y2]
         self._resize_preview_bbox = None # live preview bbox in video coords
+
+        # Drag (move) state
+        self._dragging = False
+        self._drag_orig_bbox = None      # original bbox in video coords
+        self._drag_start_video = None    # (vx, vy) start of drag in video coords
+        self._drag_preview_bbox = None   # live preview bbox in video coords
 
         self.setStyleSheet("background-color: #000;")
 
@@ -106,6 +116,7 @@ class VideoCanvas(QWidget):
             self._cap = None
         self._pixmap = None
         self._last_frame_read = -1
+        self.clear_frame_cache()
         self.update()
 
     @property
@@ -121,14 +132,17 @@ class VideoCanvas(QWidget):
         return self._total_frames
 
     def set_frame(self, frame_num: int):
-        """Load and display a specific frame number.
-
-        For sequential advancement (frame_num == last_frame_read + 1), we simply
-        call cap.read() which is reliable across all codecs.  For arbitrary seeks
-        we fall back to CAP_PROP_POS_FRAMES, and if that silently returns the
-        wrong frame we verify and retry once.
-        """
+        """Load and display a specific frame number with caching."""
         if not self._cap or not self._cap.isOpened():
+            return
+
+        # Check cache first
+        if frame_num in self._frame_cache:
+            self._pixmap = self._frame_cache[frame_num]
+            self._last_frame_read = frame_num
+            self.current_frame = frame_num
+            self._update_display_rect()
+            self.update()
             return
 
         if frame_num == self._last_frame_read + 1:
@@ -151,8 +165,28 @@ class VideoCanvas(QWidget):
         bytes_per_line = ch * w
         qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
         self._pixmap = QPixmap.fromImage(qimg)
+
+        # Store in cache
+        self._cache_frame(frame_num, self._pixmap)
+
         self._update_display_rect()
-        self.repaint()  # force immediate repaint (update() can be coalesced/deferred)
+        self.update()
+
+    def _cache_frame(self, frame_num, pixmap):
+        """Add a frame to the LRU cache."""
+        if frame_num in self._frame_cache:
+            self._frame_cache_order.remove(frame_num)
+        self._frame_cache[frame_num] = pixmap
+        self._frame_cache_order.append(frame_num)
+        # Evict oldest if over limit
+        while len(self._frame_cache_order) > self._frame_cache_max:
+            oldest = self._frame_cache_order.pop(0)
+            self._frame_cache.pop(oldest, None)
+
+    def clear_frame_cache(self):
+        """Clear the frame cache."""
+        self._frame_cache.clear()
+        self._frame_cache_order.clear()
 
     # ------------------------------------------------------------------
     # Coordinate mapping
@@ -309,7 +343,12 @@ class VideoCanvas(QWidget):
             track_id = track.get("track_id")
             is_dimmed = track_id in self.dimmed_track_ids
 
-            x1, y1, x2, y2 = frame_data["bbox"]
+            # Use drag preview bbox if this track is being dragged
+            if (self._dragging and self._drag_preview_bbox is not None
+                    and track_id == self.selected_track_id):
+                x1, y1, x2, y2 = self._drag_preview_bbox
+            else:
+                x1, y1, x2, y2 = frame_data["bbox"]
             sx1 = dr.x() + x1 * scale_x
             sy1 = dr.y() + y1 * scale_y
             sw = (x2 - x1) * scale_x
@@ -475,7 +514,7 @@ class VideoCanvas(QWidget):
             self._draw_end = (cx, cy)
             return
 
-        # Select mode -- check for resize handle hit first, then emit click
+        # Select mode -- check for resize handle hit first, then drag, then click
         if self.drawing_mode == "select":
             handle = self._hit_test_handles(cx, cy)
             if handle:
@@ -493,7 +532,23 @@ class VideoCanvas(QWidget):
                         break
                 return
 
+            # Check if clicking inside selected bbox to drag-move
             vx, vy = self._canvas_to_video(cx, cy)
+            if self.selected_track_id is not None:
+                for track in self.tracks:
+                    if track.get('track_id') == self.selected_track_id:
+                        for fd in track.get('frames', []):
+                            if fd.get('frame') == self.current_frame:
+                                bbox = fd['bbox']
+                                if bbox[0] <= vx <= bbox[2] and bbox[1] <= vy <= bbox[3]:
+                                    self._dragging = True
+                                    self._drag_orig_bbox = list(bbox)
+                                    self._drag_start_video = (vx, vy)
+                                    self._drag_preview_bbox = list(bbox)
+                                    self.setCursor(Qt.ClosedHandCursor)
+                                    return
+                        break
+
             self.frame_clicked.emit(int(vx), int(vy))
 
     def mouseMoveEvent(self, event):
@@ -527,6 +582,19 @@ class VideoCanvas(QWidget):
             self.update()
             return
 
+        # Drag-move
+        if self._dragging and self._drag_orig_bbox is not None:
+            vx, vy = self._canvas_to_video(cx, cy)
+            dx = vx - self._drag_start_video[0]
+            dy = vy - self._drag_start_video[1]
+            orig = self._drag_orig_bbox
+            self._drag_preview_bbox = [
+                orig[0] + dx, orig[1] + dy,
+                orig[2] + dx, orig[3] + dy,
+            ]
+            self.update()
+            return
+
         if self._is_drawing and self.drawing_mode in ("draw_box", "roi_rect"):
             self._draw_end = (cx, cy)
             self.update()
@@ -538,6 +606,18 @@ class VideoCanvas(QWidget):
             if handle:
                 self.setCursor(HANDLE_CURSORS[handle])
             else:
+                # Check if hovering inside selected bbox for move cursor
+                if self.selected_track_id is not None:
+                    vx, vy = self._canvas_to_video(cx, cy)
+                    for track in self.tracks:
+                        if track.get('track_id') == self.selected_track_id:
+                            for fd in track.get('frames', []):
+                                if fd.get('frame') == self.current_frame:
+                                    bbox = fd['bbox']
+                                    if bbox[0] <= vx <= bbox[2] and bbox[1] <= vy <= bbox[3]:
+                                        self.setCursor(Qt.OpenHandCursor)
+                                        return
+                            break
                 self.setCursor(Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, event):
@@ -552,6 +632,18 @@ class VideoCanvas(QWidget):
             self._resize_orig_bbox = None
             self._resize_preview_bbox = None
             self.bbox_resized.emit(final_bbox)
+            self.update()
+            return
+
+        # Finalize drag-move
+        if self._dragging and self._drag_preview_bbox is not None:
+            final_bbox = self._drag_preview_bbox
+            self._dragging = False
+            self._drag_orig_bbox = None
+            self._drag_start_video = None
+            self._drag_preview_bbox = None
+            self.setCursor(Qt.ArrowCursor)
+            self.bbox_moved.emit(final_bbox)
             self.update()
             return
 

@@ -852,3 +852,28 @@ class DataManager:
             data[session_id] = roi
         with open(roi_file, "w") as f:
             json.dump(data, f, indent=2)
+
+    # ------------------------------------------------------------------
+    # Global Processing ROI
+    # ------------------------------------------------------------------
+
+    def get_global_processing_roi(self) -> dict | None:
+        """Load the global processing ROI."""
+        roi_file = self.config_dir / "global_roi.json"
+        if not roi_file.exists():
+            return None
+        try:
+            with open(roi_file, "r") as f:
+                data = json.load(f)
+            return data if data else None
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def set_global_processing_roi(self, roi: dict | None):
+        """Save (or clear) the global processing ROI."""
+        roi_file = self.config_dir / "global_roi.json"
+        if roi is None:
+            roi_file.unlink(missing_ok=True)
+        else:
+            with open(roi_file, "w") as f:
+                json.dump(roi, f, indent=2)

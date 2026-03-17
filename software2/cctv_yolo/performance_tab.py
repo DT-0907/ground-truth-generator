@@ -10,6 +10,10 @@ from collections import defaultdict
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+
+from cctv_yolo.video_canvas import VideoCanvas
+from cctv_yolo.dialogs import RoiNameDialog
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -145,6 +149,39 @@ QLabel {{
 }}
 """
 
+ROI_COLORS = ["#ff6b6b", "#4ecdc4", "#45b7d1", "#96ceb4", "#feca57", "#ff9ff3", "#54a0ff", "#5f27cd"]
+
+SECONDARY_BTN = f"""
+QPushButton {{
+    background-color: transparent;
+    color: {ACCENT};
+    border: 1px solid {ACCENT};
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+}}
+QPushButton:hover {{
+    background-color: {ACCENT};
+    color: #000;
+}}
+QPushButton:disabled {{
+    border-color: {BORDER};
+    color: #666;
+}}
+"""
+
+ROI_BTN_ACTIVE = f"""
+QPushButton {{
+    background-color: {ACCENT};
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-weight: bold;
+    font-size: 11px;
+}}
+"""
+
 # Vehicle type display colors for stat cards
 VEHICLE_COLORS = {
     "car": "#4ecca3",
@@ -162,6 +199,8 @@ class PerformanceTab(QWidget):
         super().__init__(parent)
         self.data_manager = data_manager
         self._current_stats = {}
+        self._performance_rois = []  # ROIs defined in performance tab
+        self._current_session_id = None
         self._setup_ui()
         self._populate_sessions()
 
@@ -206,6 +245,59 @@ class PerformanceTab(QWidget):
         selector_row.addWidget(self.btn_export_csv)
 
         layout.addLayout(selector_row)
+
+        # --- ROI Drawing Panel ---
+        self.roi_panel = QFrame()
+        self.roi_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {PANEL};
+                border: 1px solid {BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        self.roi_panel.setVisible(False)
+
+        roi_panel_layout = QVBoxLayout(self.roi_panel)
+        roi_panel_layout.setContentsMargins(12, 8, 12, 8)
+        roi_panel_layout.setSpacing(6)
+
+        roi_header = QHBoxLayout()
+        roi_title = QLabel("Define ROI for Statistics")
+        roi_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT}; border: none;")
+        roi_header.addWidget(roi_title)
+        roi_header.addStretch()
+
+        self.btn_roi_rect = QPushButton("Draw Rect ROI")
+        self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_rect.setCheckable(True)
+        self.btn_roi_rect.clicked.connect(self._on_roi_rect_mode)
+        roi_header.addWidget(self.btn_roi_rect)
+
+        self.btn_roi_poly = QPushButton("Draw Polygon ROI")
+        self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_poly.setCheckable(True)
+        self.btn_roi_poly.clicked.connect(self._on_roi_poly_mode)
+        roi_header.addWidget(self.btn_roi_poly)
+
+        self.btn_roi_clear = QPushButton("Clear All ROIs")
+        self.btn_roi_clear.setStyleSheet(SECONDARY_BTN)
+        self.btn_roi_clear.clicked.connect(self._on_roi_clear_all)
+        roi_header.addWidget(self.btn_roi_clear)
+
+        roi_panel_layout.addLayout(roi_header)
+
+        self.perf_canvas = VideoCanvas()
+        self.perf_canvas.setMinimumHeight(200)
+        self.perf_canvas.setMaximumHeight(300)
+        self.perf_canvas.roi_rect_drawn.connect(self._on_perf_roi_rect_drawn)
+        self.perf_canvas.roi_polygon_drawn.connect(self._on_perf_roi_polygon_drawn)
+        roi_panel_layout.addWidget(self.perf_canvas)
+
+        self.roi_status = QLabel("Draw ROIs on the frame to calculate per-region statistics.")
+        self.roi_status.setStyleSheet("color: #999; font-size: 11px; border: none;")
+        roi_panel_layout.addWidget(self.roi_status)
+
+        layout.addWidget(self.roi_panel)
 
         # --- Scrollable content area ---
         scroll = QScrollArea()
@@ -288,7 +380,20 @@ class PerformanceTab(QWidget):
         if not session_id:
             self._show_placeholder()
             self.btn_export_csv.setEnabled(False)
+            self.roi_panel.setVisible(False)
+            self._current_session_id = None
             return
+        self._current_session_id = session_id
+        # Open video in ROI canvas for first frame preview
+        video_path = self.data_manager.get_video_path(session_id)
+        if video_path and video_path.exists():
+            self.perf_canvas.open_video(str(video_path))
+            self.perf_canvas.set_frame(0)
+            self.perf_canvas.drawing_mode = "select"
+            self._update_roi_display()
+            self.roi_panel.setVisible(True)
+        else:
+            self.roi_panel.setVisible(False)
         self._load_stats(session_id)
 
     # ------------------------------------------------------------------
@@ -304,7 +409,7 @@ class PerformanceTab(QWidget):
             return
 
         tracks = data.get("tracks", [])
-        rois = data.get("rois", [])
+        rois = self._performance_rois if self._performance_rois else data.get("rois", [])
 
         # Compute per-class counts
         class_counts = defaultdict(int)
@@ -354,18 +459,24 @@ class PerformanceTab(QWidget):
 
     def _point_in_roi(self, x, y, roi_type, points):
         """Check if a point (x, y) is inside the given ROI."""
+        # Normalize points - handle both tuple and dict formats
+        def pt_xy(p):
+            if isinstance(p, dict):
+                return (p.get("x", 0), p.get("y", 0))
+            return p
+
         if roi_type == "rect" and len(points) == 2:
-            x1, y1 = points[0]
-            x2, y2 = points[1]
+            x1, y1 = pt_xy(points[0])
+            x2, y2 = pt_xy(points[1])
             return min(x1, x2) <= x <= max(x1, x2) and min(y1, y2) <= y <= max(y1, y2)
         elif roi_type == "polygon" and len(points) >= 3:
-            # Ray-casting algorithm
-            n = len(points)
+            norm_pts = [pt_xy(p) for p in points]
+            n = len(norm_pts)
             inside = False
             j = n - 1
             for i in range(n):
-                xi, yi = points[i]
-                xj, yj = points[j]
+                xi, yi = norm_pts[i]
+                xj, yj = norm_pts[j]
                 if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
                     inside = not inside
                 j = i
@@ -505,8 +616,7 @@ class PerformanceTab(QWidget):
             roi_table.setFixedHeight(max(50, 30 + len(roi_counts) * 35))
             self.content_layout.addWidget(roi_table)
         else:
-            no_roi_lbl = QLabel("No ROIs defined for this session. "
-                                "Draw ROIs in the Review window to see per-region counts.")
+            no_roi_lbl = QLabel("No ROIs defined. Use the ROI drawing tools above to define regions.")
             no_roi_lbl.setStyleSheet("color: #777; font-size: 12px; padding: 8px;")
             no_roi_lbl.setWordWrap(True)
             self.content_layout.addWidget(no_roi_lbl)
@@ -533,6 +643,93 @@ class PerformanceTab(QWidget):
         # If no match, show placeholder
         self._show_placeholder()
         self.btn_export_csv.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    # ROI Drawing
+    # ------------------------------------------------------------------
+
+    def _on_roi_rect_mode(self, checked):
+        if checked:
+            self.btn_roi_poly.setChecked(False)
+            self.perf_canvas.drawing_mode = "roi_rect"
+            self.perf_canvas.set_cursor_for_mode()
+            self.btn_roi_rect.setStyleSheet(ROI_BTN_ACTIVE)
+            self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+        else:
+            self.perf_canvas.drawing_mode = "select"
+            self.perf_canvas.set_cursor_for_mode()
+            self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+
+    def _on_roi_poly_mode(self, checked):
+        if checked:
+            self.btn_roi_rect.setChecked(False)
+            self.perf_canvas.drawing_mode = "roi_polygon"
+            self.perf_canvas.set_cursor_for_mode()
+            self.btn_roi_poly.setStyleSheet(ROI_BTN_ACTIVE)
+            self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        else:
+            self.perf_canvas.drawing_mode = "select"
+            self.perf_canvas.set_cursor_for_mode()
+            self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+
+    def _on_perf_roi_rect_drawn(self, p1, p2):
+        dlg = RoiNameDialog(f"ROI {len(self._performance_rois) + 1}", self)
+        if dlg.exec() != RoiNameDialog.Accepted:
+            return
+        name = dlg.roi_name()
+        roi = {
+            "type": "rect",
+            "name": name,
+            "points": [p1, p2],
+            "color": ROI_COLORS[len(self._performance_rois) % len(ROI_COLORS)],
+        }
+        self._performance_rois.append(roi)
+        self._update_roi_display()
+        self.btn_roi_rect.setChecked(False)
+        self.perf_canvas.drawing_mode = "select"
+        self.perf_canvas.set_cursor_for_mode()
+        self.btn_roi_rect.setStyleSheet(SECONDARY_BTN)
+        # Recalculate stats with new ROIs
+        if self._current_session_id:
+            self._load_stats(self._current_session_id)
+
+    def _on_perf_roi_polygon_drawn(self, points):
+        if len(points) < 3:
+            return
+        dlg = RoiNameDialog(f"ROI {len(self._performance_rois) + 1}", self)
+        if dlg.exec() != RoiNameDialog.Accepted:
+            return
+        name = dlg.roi_name()
+        roi = {
+            "type": "polygon",
+            "name": name,
+            "points": points,
+            "color": ROI_COLORS[len(self._performance_rois) % len(ROI_COLORS)],
+        }
+        self._performance_rois.append(roi)
+        self._update_roi_display()
+        self.btn_roi_poly.setChecked(False)
+        self.perf_canvas.drawing_mode = "select"
+        self.perf_canvas.set_cursor_for_mode()
+        self.btn_roi_poly.setStyleSheet(SECONDARY_BTN)
+        if self._current_session_id:
+            self._load_stats(self._current_session_id)
+
+    def _on_roi_clear_all(self):
+        self._performance_rois = []
+        self._update_roi_display()
+        if self._current_session_id:
+            self._load_stats(self._current_session_id)
+
+    def _update_roi_display(self):
+        """Update the canvas ROI overlay."""
+        self.perf_canvas.rois = self._performance_rois
+        self.perf_canvas.update()
+        count = len(self._performance_rois)
+        if count > 0:
+            self.roi_status.setText(f"{count} ROI(s) defined. Statistics will include per-ROI counts.")
+        else:
+            self.roi_status.setText("Draw ROIs on the frame to calculate per-region statistics.")
 
     # ------------------------------------------------------------------
     # CSV Export

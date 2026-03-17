@@ -469,6 +469,19 @@
                 <input type="number" id="confInput" value="0.25" min="0.05" max="0.95" step="0.05" style="width:70px;">
                 <button class="btn btn-process btn-sm" onclick="processAllUnprocessed()">Process All Unprocessed</button>
             </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer;">
+                    <input type="checkbox" id="useGlobalRoi" onchange="toggleGlobalRoi()"> Use Global ROI for all videos
+                </label>
+                <button class="btn btn-sm" id="setGlobalRoiBtn" onclick="showGlobalRoiModal()" style="display:none;">Set Global ROI</button>
+                <span id="globalRoiStatus" style="font-size:11px;color:#777;"></span>
+                <div style="margin-left:auto;">
+                    <label class="btn btn-sm" style="cursor:pointer;">
+                        Upload Model
+                        <input type="file" accept=".pt" id="modelUploadInput" onchange="uploadModel()" style="display:none;">
+                    </label>
+                </div>
+            </div>
 
             <div class="video-grid" id="videoGrid">
                 <div class="empty-state" style="grid-column:1/-1;">
@@ -657,6 +670,26 @@
                     <button class="btn btn-primary" id="nasConnectBtn" onclick="connectNas()">Connect</button>
                     <button class="btn btn-danger" id="nasDisconnectBtn" onclick="disconnectNas()" style="display:none;">Disconnect</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global ROI Modal -->
+    <div class="modal-overlay" id="globalRoiModal">
+        <div class="roi-modal-box">
+            <h3>Set Global Processing ROI</h3>
+            <p style="font-size:12px;color:#888;margin-bottom:10px;">
+                This ROI will be applied to ALL videos during processing. Draw a rectangle on a sample frame.
+            </p>
+            <div class="roi-canvas-container" id="globalRoiCanvasContainer">
+                <img id="globalRoiFrameImg">
+                <canvas id="globalRoiCanvas"></canvas>
+            </div>
+            <div class="roi-modal-actions">
+                <button class="btn btn-primary" onclick="saveGlobalRoi()">Save Global ROI</button>
+                <button class="btn btn-secondary" onclick="clearGlobalRoi()">Clear ROI</button>
+                <button class="btn btn-secondary" onclick="closeGlobalRoiModal()">Cancel</button>
+                <span class="roi-modal-info" id="globalRoiInfo">Click and drag to draw a rectangle</span>
             </div>
         </div>
     </div>
@@ -1074,6 +1107,199 @@
             }
         }
 
+        // ===== Global ROI =====
+        let _globalRoiRect = null;
+        let _globalRoiDrawing = false;
+        let _globalRoiStart = null;
+        let _globalRoiImgW = 0;
+        let _globalRoiImgH = 0;
+        let _globalRoiEnabled = false;
+        let _savedGlobalRoi = null;
+
+        async function loadGlobalRoi() {
+            try {
+                const res = await fetch('/api/global-roi');
+                const data = await res.json();
+                if (data && data.type) {
+                    _savedGlobalRoi = data;
+                    document.getElementById('useGlobalRoi').checked = true;
+                    _globalRoiEnabled = true;
+                    document.getElementById('setGlobalRoiBtn').style.display = '';
+                    document.getElementById('globalRoiStatus').textContent = 'Global ROI active';
+                    document.getElementById('globalRoiStatus').style.color = '#4ecca3';
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function toggleGlobalRoi() {
+            const checked = document.getElementById('useGlobalRoi').checked;
+            _globalRoiEnabled = checked;
+            document.getElementById('setGlobalRoiBtn').style.display = checked ? '' : 'none';
+            if (!checked) {
+                document.getElementById('globalRoiStatus').textContent = '';
+            } else if (_savedGlobalRoi) {
+                document.getElementById('globalRoiStatus').textContent = 'Global ROI active';
+                document.getElementById('globalRoiStatus').style.color = '#4ecca3';
+            } else {
+                document.getElementById('globalRoiStatus').textContent = 'No ROI set yet';
+                document.getElementById('globalRoiStatus').style.color = '#f39c12';
+            }
+        }
+
+        async function showGlobalRoiModal() {
+            _globalRoiRect = null;
+            _globalRoiDrawing = false;
+            _globalRoiStart = null;
+            const modal = document.getElementById('globalRoiModal');
+            const img = document.getElementById('globalRoiFrameImg');
+            const gCanvas = document.getElementById('globalRoiCanvas');
+            // Use first available video thumbnail
+            try {
+                const res = await fetch('/api/videos');
+                const videos = await res.json();
+                if (videos.length > 0) {
+                    img.onload = function() {
+                        _globalRoiImgW = img.naturalWidth;
+                        _globalRoiImgH = img.naturalHeight;
+                        gCanvas.width = img.clientWidth;
+                        gCanvas.height = img.clientHeight;
+                        gCanvas.style.width = img.clientWidth + 'px';
+                        gCanvas.style.height = img.clientHeight + 'px';
+                        drawGlobalRoiOverlay();
+                    };
+                    img.src = '/api/videos/thumbnail/' + encodeURIComponent(videos[0].session_id);
+                }
+            } catch (e) { /* ignore */ }
+            modal.classList.add('show');
+            document.getElementById('globalRoiInfo').textContent = 'Click and drag to draw a rectangle';
+        }
+
+        function closeGlobalRoiModal() {
+            document.getElementById('globalRoiModal').classList.remove('show');
+        }
+
+        async function saveGlobalRoi() {
+            if (!_globalRoiRect) {
+                showToast('Draw a rectangle first', true);
+                return;
+            }
+            const gCanvas = document.getElementById('globalRoiCanvas');
+            const img = document.getElementById('globalRoiFrameImg');
+            const scaleX = _globalRoiImgW / img.clientWidth;
+            const scaleY = _globalRoiImgH / img.clientHeight;
+            const roi = {
+                type: 'rect',
+                points: [
+                    {x: Math.round(_globalRoiRect.x1 * scaleX), y: Math.round(_globalRoiRect.y1 * scaleY)},
+                    {x: Math.round(_globalRoiRect.x2 * scaleX), y: Math.round(_globalRoiRect.y2 * scaleY)}
+                ]
+            };
+            try {
+                await fetch('/api/global-roi', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(roi)
+                });
+                _savedGlobalRoi = roi;
+                document.getElementById('globalRoiStatus').textContent = 'Global ROI active';
+                document.getElementById('globalRoiStatus').style.color = '#4ecca3';
+                closeGlobalRoiModal();
+                showToast('Global ROI saved');
+            } catch (e) { showToast('Failed to save', true); }
+        }
+
+        async function clearGlobalRoi() {
+            try {
+                await fetch('/api/global-roi', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(null)
+                });
+                _savedGlobalRoi = null;
+                _globalRoiRect = null;
+                document.getElementById('globalRoiStatus').textContent = 'ROI cleared';
+                document.getElementById('globalRoiStatus').style.color = '#777';
+                drawGlobalRoiOverlay();
+                showToast('Global ROI cleared');
+            } catch (e) { showToast('Failed to clear', true); }
+        }
+
+        function drawGlobalRoiOverlay() {
+            const gCanvas = document.getElementById('globalRoiCanvas');
+            if (!gCanvas) return;
+            const ctx = gCanvas.getContext('2d');
+            ctx.clearRect(0, 0, gCanvas.width, gCanvas.height);
+            if (_globalRoiRect) {
+                const r = _globalRoiRect;
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, gCanvas.width, gCanvas.height);
+                ctx.clearRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+                ctx.strokeStyle = '#4ecca3';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 3]);
+                ctx.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+                ctx.setLineDash([]);
+            }
+        }
+
+        // Global ROI canvas drawing events
+        (function() {
+            const gCanvas = document.getElementById('globalRoiCanvas');
+            gCanvas.addEventListener('mousedown', function(e) {
+                const rect = gCanvas.getBoundingClientRect();
+                _globalRoiStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                _globalRoiDrawing = true;
+                _globalRoiRect = null;
+            });
+            gCanvas.addEventListener('mousemove', function(e) {
+                if (!_globalRoiDrawing || !_globalRoiStart) return;
+                const rect = gCanvas.getBoundingClientRect();
+                const cx = e.clientX - rect.left;
+                const cy = e.clientY - rect.top;
+                _globalRoiRect = {
+                    x1: Math.min(_globalRoiStart.x, cx),
+                    y1: Math.min(_globalRoiStart.y, cy),
+                    x2: Math.max(_globalRoiStart.x, cx),
+                    y2: Math.max(_globalRoiStart.y, cy),
+                };
+                drawGlobalRoiOverlay();
+            });
+            gCanvas.addEventListener('mouseup', function() {
+                _globalRoiDrawing = false;
+                if (_globalRoiRect) {
+                    const w = _globalRoiRect.x2 - _globalRoiRect.x1;
+                    const h = _globalRoiRect.y2 - _globalRoiRect.y1;
+                    if (w < 10 || h < 10) _globalRoiRect = null;
+                    else document.getElementById('globalRoiInfo').textContent = 'ROI set';
+                    drawGlobalRoiOverlay();
+                }
+            });
+        })();
+
+        // ===== Model Upload =====
+        async function uploadModel() {
+            const input = document.getElementById('modelUploadInput');
+            if (!input.files.length) return;
+            const file = input.files[0];
+            if (!file.name.endsWith('.pt')) {
+                showToast('Please select a .pt model file', true);
+                return;
+            }
+            const formData = new FormData();
+            formData.append('model', file);
+            try {
+                const res = await fetch('/api/models/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    loadModels();
+                } else {
+                    showToast(data.error || 'Upload failed', true);
+                }
+            } catch (e) { showToast('Upload failed', true); }
+            input.value = '';
+        }
+
         // ===== Process Video =====
         async function processVideo(sessionId, processingRoi) {
             const model = document.getElementById('modelSelect').value;
@@ -1082,6 +1308,7 @@
             try {
                 const body = { session_id: sessionId, model, conf };
                 if (processingRoi) body.processing_roi = processingRoi;
+                else if (_globalRoiEnabled && _savedGlobalRoi) body.processing_roi = _savedGlobalRoi;
 
                 const res = await fetch('/api/videos/process', {
                     method: 'POST',
@@ -1317,6 +1544,7 @@
         loadAppInfo();
         loadModels();
         loadVideos();
+        loadGlobalRoi();
 
         // Handle hash navigation
         if (window.location.hash === '#correction') {

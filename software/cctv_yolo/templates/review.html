@@ -430,9 +430,8 @@
                 <div class="separator"></div>
                 <button id="nextReviewBtn" title="Next review track (R)">Next Review</button>
                 <span class="review-progress" id="reviewProgress"></span>
-                <div class="separator"></div>
-                <button id="roiRectBtn" title="Draw rectangular ROI (Shift+R)">ROI Rect</button>
-                <button id="roiPolyBtn" title="Draw polygon ROI (Shift+P)">ROI Poly</button>
+                <button id="roiRectBtn" style="display:none">ROI Rect</button>
+                <button id="roiPolyBtn" style="display:none">ROI Poly</button>
                 <div class="mode-indicator" id="modeIndicator">Select Mode</div>
             </div>
 
@@ -469,14 +468,14 @@
                 <button class="filter-btn" data-filter="car">Car</button>
                 <button class="filter-btn" data-filter="truck">Truck</button>
                 <button class="filter-btn" data-filter="bus">Bus</button>
-                <label class="roi-filter-toggle" title="Only show tracks inside ROIs">
+                <label class="roi-filter-toggle" title="Only show tracks inside ROIs" style="display:none">
                     <input type="checkbox" id="roiFilterCheck"> In ROI
                 </label>
             </div>
 
             <div class="track-list" id="trackList"></div>
 
-            <div class="roi-panel" id="roiPanel">
+            <div class="roi-panel" id="roiPanel" style="display:none">
                 <h3>
                     Regions of Interest
                     <span style="font-size:10px; color:#555; font-weight:normal" id="roiCount"></span>
@@ -500,8 +499,7 @@
             <div class="shortcuts">
                 <kbd>Space</kbd> Play <kbd>&#8592;&#8594;</kbd> Frame <kbd>V</kbd> Select <kbd>B</kbd> Draw<br>
                 <kbd>D</kbd> Delete <kbd>C</kbd> Class <kbd>M</kbd> Merge <kbd>S</kbd> Split<br>
-                <kbd>N</kbd> Copy Next <kbd>P</kbd> Copy Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save<br>
-                <kbd>Shift+R</kbd> ROI Rect <kbd>Shift+P</kbd> ROI Poly
+                <kbd>N</kbd> Copy Next <kbd>P</kbd> Copy Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save
             </div>
         </div>
     </div>
@@ -627,7 +625,7 @@
 
         // Frame preload cache
         const frameCache = new Map();
-        const PRELOAD_AHEAD = 3;
+        const PRELOAD_AHEAD = 10;
 
         // DOM elements
         const frameImage = document.getElementById('frameImage');
@@ -713,7 +711,7 @@
             img.src = `/frame/${sessionId}/${frameNum}`;
             img.onload = () => { frameCache.set(frameNum, img); };
             // Evict old frames if cache too large
-            if (frameCache.size > 20) {
+            if (frameCache.size > 150) {
                 const oldest = frameCache.keys().next().value;
                 frameCache.delete(oldest);
             }
@@ -774,9 +772,12 @@
                 img.src = `/frame/${sessionId}/${frameNum}`;
             }
 
-            // Preload ahead
+            // Preload ahead and behind
             for (let i = 1; i <= PRELOAD_AHEAD; i++) {
                 preloadFrame(frameNum + i);
+            }
+            for (let i = 1; i <= 3; i++) {
+                preloadFrame(frameNum - i);
             }
 
             slider.value = frameNum;
@@ -914,6 +915,7 @@
                         const handles = getResizeHandles(fd.bbox);
                         const hit = hitTestHandle(coords.x, coords.y, handles);
                         if (hit) {
+                            saveState(); // Save pre-resize state for undo
                             isResizing = true;
                             resizeHandle = hit;
                             resizeTrackId = selectedTrackId;
@@ -924,6 +926,7 @@
                         // Check if clicking inside selected bbox to drag
                         const [bx1, by1, bx2, by2] = fd.bbox;
                         if (vCoords.x >= bx1 && vCoords.x <= bx2 && vCoords.y >= by1 && vCoords.y <= by2) {
+                            saveState(); // Save pre-drag state for undo
                             isDraggingBbox = true;
                             dragTrackId = selectedTrackId;
                             dragOrigBbox = [...fd.bbox];
@@ -1073,15 +1076,14 @@
                 dragOrigBbox = null;
                 dragStartVideo = null;
                 dragTrackId = null;
-                hasUnsavedChanges = true;
-                saveState();
+                markUnsaved();
                 drawBoxes();
                 return;
             }
 
             // Resize finish
             if (isResizing) {
-                saveState();
+                markUnsaved();
                 isResizing = false;
                 resizeHandle = null;
                 resizeTrackId = null;
@@ -1991,6 +1993,7 @@
             this.classList.toggle('active', isPlaying);
 
             if (isPlaying) {
+                const frameInterval = fps > 0 ? 1000 / fps : 33;
                 function playStep() {
                     if (!isPlaying) return;
                     if (currentFrame >= totalFrames - 1) {
@@ -1999,16 +2002,13 @@
                         document.getElementById('playBtn').classList.remove('active');
                         return;
                     }
-                    if (frameReady) {
-                        frameReady = false;
-                        loadFrame(currentFrame + 1);
-                    }
-                    playTimer = requestAnimationFrame(playStep);
+                    loadFrame(currentFrame + 1);
+                    playTimer = setTimeout(playStep, frameInterval);
                 }
-                playTimer = requestAnimationFrame(playStep);
+                playTimer = setTimeout(playStep, frameInterval);
             } else {
                 if (playTimer) {
-                    cancelAnimationFrame(playTimer);
+                    clearTimeout(playTimer);
                     playTimer = null;
                 }
             }
@@ -2064,12 +2064,6 @@
         // ===== KEYBOARD =====
         document.addEventListener('keydown', e => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-
-            // Shift shortcuts for ROI
-            if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                if (e.key === 'R') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'rect' ? false : 'rect'); return; }
-                if (e.key === 'P') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'polygon' ? false : 'polygon'); return; }
-            }
 
             // Ctrl shortcuts
             if (e.ctrlKey || e.metaKey) {
