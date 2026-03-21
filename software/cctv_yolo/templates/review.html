@@ -430,8 +430,8 @@
                 <div class="separator"></div>
                 <button id="nextReviewBtn" title="Next review track (R)">Next Review</button>
                 <span class="review-progress" id="reviewProgress"></span>
-                <button id="roiRectBtn" style="display:none">ROI Rect</button>
-                <button id="roiPolyBtn" style="display:none">ROI Poly</button>
+                <button id="roiRectBtn">ROI Rect</button>
+                <button id="roiPolyBtn">ROI Poly</button>
                 <div class="mode-indicator" id="modeIndicator">Select Mode</div>
             </div>
 
@@ -468,14 +468,14 @@
                 <button class="filter-btn" data-filter="car">Car</button>
                 <button class="filter-btn" data-filter="truck">Truck</button>
                 <button class="filter-btn" data-filter="bus">Bus</button>
-                <label class="roi-filter-toggle" title="Only show tracks inside ROIs" style="display:none">
+                <label class="roi-filter-toggle" title="Only show tracks inside ROIs">
                     <input type="checkbox" id="roiFilterCheck"> In ROI
                 </label>
             </div>
 
             <div class="track-list" id="trackList"></div>
 
-            <div class="roi-panel" id="roiPanel" style="display:none">
+            <div class="roi-panel" id="roiPanel"
                 <h3>
                     Regions of Interest
                     <span style="font-size:10px; color:#555; font-weight:normal" id="roiCount"></span>
@@ -500,6 +500,7 @@
                 <kbd>Space</kbd> Play <kbd>&#8592;&#8594;</kbd> Frame <kbd>V</kbd> Select <kbd>B</kbd> Draw<br>
                 <kbd>D</kbd> Delete <kbd>C</kbd> Class <kbd>M</kbd> Merge <kbd>S</kbd> Split<br>
                 <kbd>N</kbd> Copy Next <kbd>P</kbd> Copy Prev <kbd>R</kbd> Next Review <kbd>Ctrl+S</kbd> Save
+                <kbd>Shift+R</kbd> ROI Rect <kbd>Shift+P</kbd> ROI Poly
             </div>
         </div>
     </div>
@@ -2070,6 +2071,12 @@
                 if (e.key === 'z') { e.preventDefault(); undo(); return; }
                 if (e.key === 'y') { e.preventDefault(); redo(); return; }
                 if (e.key === 's') { e.preventDefault(); saveCorrections(); return; }
+            }
+
+            // Shift shortcuts
+            if (e.shiftKey) {
+                if (e.key === 'R') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'rect' ? false : 'rect'); return; }
+                if (e.key === 'P') { e.preventDefault(); setRoiDrawMode(isRoiDrawMode && roiDrawType === 'polygon' ? false : 'polygon'); return; }
             }
 
             switch(e.key) {

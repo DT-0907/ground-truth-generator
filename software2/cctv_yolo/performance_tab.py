@@ -287,17 +287,17 @@ class PerformanceTab(QWidget):
         roi_panel_layout.addLayout(roi_header)
 
         self.perf_canvas = VideoCanvas()
-        self.perf_canvas.setMinimumHeight(200)
-        self.perf_canvas.setMaximumHeight(300)
+        self.perf_canvas.setMinimumHeight(350)
+        self.perf_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.perf_canvas.roi_rect_drawn.connect(self._on_perf_roi_rect_drawn)
         self.perf_canvas.roi_polygon_drawn.connect(self._on_perf_roi_polygon_drawn)
-        roi_panel_layout.addWidget(self.perf_canvas)
+        roi_panel_layout.addWidget(self.perf_canvas, stretch=1)
 
         self.roi_status = QLabel("Draw ROIs on the frame to calculate per-region statistics.")
         self.roi_status.setStyleSheet("color: #999; font-size: 11px; border: none;")
         roi_panel_layout.addWidget(self.roi_status)
 
-        layout.addWidget(self.roi_panel)
+        layout.addWidget(self.roi_panel, stretch=2)
 
         # --- Scrollable content area ---
         scroll = QScrollArea()
@@ -384,6 +384,12 @@ class PerformanceTab(QWidget):
             self._current_session_id = None
             return
         self._current_session_id = session_id
+        # Load existing ROIs from session data
+        data = self.data_manager.load_session_data(session_id)
+        if data:
+            self._performance_rois = data.get("rois", [])
+        else:
+            self._performance_rois = []
         # Open video in ROI canvas for first frame preview
         video_path = self.data_manager.get_video_path(session_id)
         if video_path and video_path.exists():
@@ -585,37 +591,39 @@ class PerformanceTab(QWidget):
         type_table.setFixedHeight(max(50, 30 + len(all_classes) * 35))
         self.content_layout.addWidget(type_table)
 
-        # --- Per-ROI counts ---
+        # --- Per-ROI counts (multi-selectable for export) ---
         if roi_counts:
-            roi_section = QLabel("ROI Counts")
+            roi_section = QLabel("ROI Counts  (select rows to filter CSV export)")
             roi_section.setStyleSheet(SECTION_LABEL)
             self.content_layout.addWidget(roi_section)
 
-            roi_table = QTableWidget()
-            roi_table.setStyleSheet(TABLE_STYLE)
-            roi_table.setColumnCount(3)
-            roi_table.setHorizontalHeaderLabels(["ROI Name", "Type", "Vehicles"])
-            roi_table.horizontalHeader().setStretchLastSection(True)
-            roi_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            roi_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            roi_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            roi_table.verticalHeader().setVisible(False)
-            roi_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            roi_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.roi_table = QTableWidget()
+            self.roi_table.setStyleSheet(TABLE_STYLE)
+            self.roi_table.setColumnCount(3)
+            self.roi_table.setHorizontalHeaderLabels(["ROI Name", "Type", "Vehicles"])
+            self.roi_table.horizontalHeader().setStretchLastSection(True)
+            self.roi_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.roi_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.roi_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            self.roi_table.verticalHeader().setVisible(False)
+            self.roi_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.roi_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.roi_table.setSelectionMode(QAbstractItemView.MultiSelection)
 
-            roi_table.setRowCount(len(roi_counts))
+            self.roi_table.setRowCount(len(roi_counts))
             for row, roi in enumerate(roi_counts):
                 name_item = QTableWidgetItem(roi["name"])
                 type_item = QTableWidgetItem(roi["type"].capitalize())
                 count_item = QTableWidgetItem(str(roi["count"]))
                 count_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                roi_table.setItem(row, 0, name_item)
-                roi_table.setItem(row, 1, type_item)
-                roi_table.setItem(row, 2, count_item)
+                self.roi_table.setItem(row, 0, name_item)
+                self.roi_table.setItem(row, 1, type_item)
+                self.roi_table.setItem(row, 2, count_item)
 
-            roi_table.setFixedHeight(max(50, 30 + len(roi_counts) * 35))
-            self.content_layout.addWidget(roi_table)
+            self.roi_table.setFixedHeight(max(50, 30 + len(roi_counts) * 35))
+            self.content_layout.addWidget(self.roi_table)
         else:
+            self.roi_table = None
             no_roi_lbl = QLabel("No ROIs defined. Use the ROI drawing tools above to define regions.")
             no_roi_lbl.setStyleSheet("color: #777; font-size: 12px; padding: 8px;")
             no_roi_lbl.setWordWrap(True)
@@ -722,7 +730,7 @@ class PerformanceTab(QWidget):
             self._load_stats(self._current_session_id)
 
     def _update_roi_display(self):
-        """Update the canvas ROI overlay."""
+        """Update the canvas ROI overlay and persist ROIs to session data."""
         self.perf_canvas.rois = self._performance_rois
         self.perf_canvas.update()
         count = len(self._performance_rois)
@@ -730,19 +738,82 @@ class PerformanceTab(QWidget):
             self.roi_status.setText(f"{count} ROI(s) defined. Statistics will include per-ROI counts.")
         else:
             self.roi_status.setText("Draw ROIs on the frame to calculate per-region statistics.")
+        # Persist ROIs to session corrections so Correction tab can see them
+        if self._current_session_id:
+            self._save_rois_to_session()
+
+    def _save_rois_to_session(self):
+        """Save current ROIs into the session's correction data."""
+        data = self.data_manager.load_session_data(self._current_session_id)
+        if data is None:
+            return
+        data["rois"] = self._performance_rois
+        self.data_manager.save_corrections(self._current_session_id, data)
 
     # ------------------------------------------------------------------
     # CSV Export
     # ------------------------------------------------------------------
 
+    def _get_selected_roi_indices(self):
+        """Return indices of selected rows in the ROI table (empty = all)."""
+        if not self.roi_table or self.roi_table.rowCount() == 0:
+            return []
+        selected = sorted(set(idx.row() for idx in self.roi_table.selectedIndexes()))
+        return selected
+
+    def _get_tracks_in_rois(self, tracks, roi_indices):
+        """Return tracks that pass through any of the specified ROIs."""
+        rois = self._performance_rois
+        if not roi_indices or not rois:
+            return tracks
+        active_rois = [rois[i] for i in roi_indices if i < len(rois)]
+        if not active_rois:
+            return tracks
+        filtered = []
+        for track in tracks:
+            for roi in active_rois:
+                found = False
+                for fd in track.get("frames", []):
+                    bbox = fd.get("bbox", [0, 0, 0, 0])
+                    cx = (bbox[0] + bbox[2]) / 2.0
+                    cy = (bbox[1] + bbox[3]) / 2.0
+                    if self._point_in_roi(cx, cy, roi.get("type", "rect"), roi.get("points", [])):
+                        found = True
+                        break
+                if found:
+                    filtered.append(track)
+                    break
+        return filtered
+
     def _export_csv(self):
-        """Export the current stats to a CSV file."""
+        """Export stats to CSV. If ROI rows are selected, only export objects in those ROIs."""
         if not self._current_stats:
             return
 
         session_id = self._current_stats.get("session_id", "session")
-        default_name = f"{session_id}_stats.csv"
+        selected_roi_idx = self._get_selected_roi_indices()
 
+        # Determine if we're filtering
+        data = self.data_manager.load_session_data(session_id)
+        all_tracks = data.get("tracks", []) if data else []
+
+        if selected_roi_idx:
+            filtered_tracks = self._get_tracks_in_rois(all_tracks, selected_roi_idx)
+            roi_names = [self._performance_rois[i].get("name", f"ROI {i+1}")
+                         for i in selected_roi_idx if i < len(self._performance_rois)]
+            filter_desc = f"Filtered by ROIs: {', '.join(roi_names)}"
+        else:
+            filtered_tracks = all_tracks
+            filter_desc = "All vehicles (no ROI filter)"
+
+        # Compute class counts from filtered tracks
+        class_counts = defaultdict(int)
+        for track in filtered_tracks:
+            cls = track.get("class", "vehicle")
+            class_counts[cls] += 1
+        total = len(filtered_tracks)
+
+        default_name = f"{session_id}_stats.csv"
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Stats as CSV",
@@ -755,24 +826,18 @@ class PerformanceTab(QWidget):
         try:
             with open(file_path, "w", newline="") as f:
                 writer = csv.writer(f)
-
-                # Header
                 writer.writerow(["CCTV-YOLO Performance Report"])
                 writer.writerow(["Session", session_id])
+                writer.writerow(["Filter", filter_desc])
                 writer.writerow([])
 
-                # Vehicle type breakdown
                 writer.writerow(["Vehicle Type Breakdown"])
                 writer.writerow(["Type", "Count", "Percentage"])
-
-                total = self._current_stats.get("total_tracks", 0) or 1
-                class_counts = self._current_stats.get("class_counts", {})
-
+                denom = total or 1
                 for cls, count in sorted(class_counts.items()):
-                    pct = (count / total) * 100.0
+                    pct = (count / denom) * 100.0
                     writer.writerow([cls.capitalize(), count, f"{pct:.1f}%"])
-
-                writer.writerow(["Total", self._current_stats.get("total_tracks", 0), "100.0%"])
+                writer.writerow(["Total", total, "100.0%"])
                 writer.writerow([])
 
                 # ROI counts
@@ -783,6 +848,7 @@ class PerformanceTab(QWidget):
                     for roi in roi_counts:
                         writer.writerow([roi["name"], roi["type"].capitalize(), roi["count"]])
 
-            QMessageBox.information(self, "Export Complete", f"Stats exported to:\n{file_path}")
+            QMessageBox.information(self, "Export Complete",
+                                    f"Stats exported to:\n{file_path}\n\n{filter_desc}\nTotal: {total} vehicles")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export CSV:\n{e}")

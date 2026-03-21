@@ -33,6 +33,7 @@ from cctv_yolo.dialogs import (
     ClassChangeDialog,
     MergeDialog,
     NewTrackDialog,
+    RoiNameDialog,
 )
 
 # ---------------------------------------------------------------------------
@@ -173,6 +174,8 @@ QPushButton:hover {{
 
 MAX_UNDO = 50
 
+ROI_COLORS = ["#ff6b6b", "#4ecdc4", "#45b7d1", "#96ceb4", "#feca57", "#ff9ff3", "#54a0ff", "#5f27cd"]
+
 
 # ---------------------------------------------------------------------------
 # Interpolation helpers
@@ -284,6 +287,9 @@ class ReviewWindow(QMainWindow):
         self.toolbar.addWidget(self.lbl_review_progress)
         self.toolbar.addSeparator()
 
+        self.btn_roi_rect = self._add_tool_button("ROI Rect (Shift+R)", checkable=True)
+        self.btn_roi_poly = self._add_tool_button("ROI Poly (Shift+P)", checkable=True)
+
         self.lbl_mode = QLabel("  Mode: Select")
         self.lbl_mode.setStyleSheet(f"color: {ACCENT}; font-weight: bold; padding: 0 8px;")
         self.toolbar.addWidget(self.lbl_mode)
@@ -296,6 +302,8 @@ class ReviewWindow(QMainWindow):
         self.btn_copy_next.triggered.connect(self._copy_to_next)
         self.btn_copy_prev.triggered.connect(self._copy_to_prev)
         self.btn_next_review.triggered.connect(self._next_review)
+        self.btn_roi_rect.triggered.connect(lambda: self._set_mode("roi_rect"))
+        self.btn_roi_poly.triggered.connect(lambda: self._set_mode("roi_polygon"))
 
         # --- Splitter: canvas + sidebar ---
         self.splitter = QSplitter(Qt.Horizontal)
@@ -384,6 +392,8 @@ class ReviewWindow(QMainWindow):
         self.canvas.box_drawn.connect(self._on_box_drawn)
         self.canvas.bbox_resized.connect(self._on_bbox_resized)
         self.canvas.bbox_moved.connect(self._on_bbox_moved)
+        self.canvas.roi_rect_drawn.connect(self._on_roi_rect_drawn)
+        self.canvas.roi_polygon_drawn.connect(self._on_roi_polygon_drawn)
 
         # --- Connect sidebar signals ---
         self.sidebar.track_selected.connect(self._on_track_selected)
@@ -394,6 +404,7 @@ class ReviewWindow(QMainWindow):
         self.sidebar.split_requested.connect(self._split_track)
         self.sidebar.save_requested.connect(self._save)
         self.sidebar.back_requested.connect(self.close)
+        self.sidebar.roi_delete_requested.connect(self._delete_roi)
 
     def _add_tool_button(self, text, checkable=False, checked=False):
         """Add a button to the toolbar and return it."""
@@ -439,6 +450,11 @@ class ReviewWindow(QMainWindow):
         sc_save = QShortcut(QKeySequence("Ctrl+S"), self)
         sc_save.activated.connect(self._save)
 
+        sc_roi_rect = QShortcut(QKeySequence("Shift+R"), self)
+        sc_roi_rect.activated.connect(lambda: self._set_mode("roi_rect"))
+
+        sc_roi_poly = QShortcut(QKeySequence("Shift+P"), self)
+        sc_roi_poly.activated.connect(lambda: self._set_mode("roi_polygon"))
 
     # ------------------------------------------------------------------
     # Data loading
@@ -491,9 +507,13 @@ class ReviewWindow(QMainWindow):
         """Switch the editing mode."""
         self.btn_select.setChecked(mode == "select")
         self.btn_draw.setChecked(mode == "draw_box")
+        self.btn_roi_rect.setChecked(mode == "roi_rect")
+        self.btn_roi_poly.setChecked(mode == "roi_polygon")
         mode_labels = {
             "select": "Select",
             "draw_box": "Draw Box",
+            "roi_rect": "ROI Rect",
+            "roi_polygon": "ROI Polygon",
         }
         self.lbl_mode.setText(f"  Mode: {mode_labels.get(mode, mode)}")
         self.canvas.drawing_mode = mode
@@ -915,6 +935,63 @@ class ReviewWindow(QMainWindow):
         self.status_bar.showMessage(f"Moved bbox for track #{self.selected_track_id}")
 
     # ------------------------------------------------------------------
+    # ROI operations
+    # ------------------------------------------------------------------
+
+    def _on_roi_rect_drawn(self, top_left, bottom_right):
+        dlg = RoiNameDialog(f"ROI {len(self.rois) + 1}", self)
+        if dlg.exec() != RoiNameDialog.Accepted:
+            return
+        name = dlg.roi_name()
+        roi = {
+            "type": "rect",
+            "name": name,
+            "points": [top_left, bottom_right],
+            "color": ROI_COLORS[len(self.rois) % len(ROI_COLORS)],
+        }
+        self.rois.append(roi)
+        self._push_undo()
+        self._mark_unsaved()
+        self._refresh_all()
+        self._set_mode("select")
+        self.status_bar.showMessage(f"ROI '{name}' created")
+
+    def _on_roi_polygon_drawn(self, points):
+        if len(points) < 3:
+            self.status_bar.showMessage("Polygon needs at least 3 points")
+            return
+        dlg = RoiNameDialog(f"ROI {len(self.rois) + 1}", self)
+        if dlg.exec() != RoiNameDialog.Accepted:
+            return
+        name = dlg.roi_name()
+        roi = {
+            "type": "polygon",
+            "name": name,
+            "points": points,
+            "color": ROI_COLORS[len(self.rois) % len(ROI_COLORS)],
+        }
+        self.rois.append(roi)
+        self._push_undo()
+        self._mark_unsaved()
+        self._refresh_all()
+        self._set_mode("select")
+        self.status_bar.showMessage(f"ROI '{name}' created")
+
+    def _delete_roi(self, roi_index):
+        if 0 <= roi_index < len(self.rois):
+            name = self.rois[roi_index].get("name", f"ROI {roi_index}")
+            reply = QMessageBox.question(
+                self, "Delete ROI", f"Delete ROI '{name}'?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self.rois.pop(roi_index)
+                self._push_undo()
+                self._mark_unsaved()
+                self._refresh_all()
+                self.status_bar.showMessage(f"ROI '{name}' deleted")
+
+    # ------------------------------------------------------------------
     # Next review
     # ------------------------------------------------------------------
 
@@ -995,6 +1072,7 @@ class ReviewWindow(QMainWindow):
     def _refresh_sidebar(self):
         """Refresh the sidebar with current state."""
         self.sidebar.set_tracks(self.tracks, self.current_frame, self.selected_track_id)
+        self.sidebar.set_rois(self.rois, self.tracks)
         self.canvas.update()
 
     def _refresh_all(self):

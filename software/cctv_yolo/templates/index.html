@@ -282,6 +282,8 @@
         }
         .perf-table td { font-size: 14px; }
         .perf-table tr:hover td { background: #1f2b4d; }
+        .perf-table tr.roi-selected td { background: #1a3a2e; }
+        .perf-table input[type="checkbox"] { cursor: pointer; accent-color: #4ecca3; }
         .perf-section {
             background: #16213e;
             border-radius: 8px;
@@ -582,9 +584,10 @@
                 <div class="perf-section" id="perfRoiSection" style="display:none;">
                     <h3>By Region of Interest</h3>
                     <table class="perf-table" id="perfByRoi">
-                        <thead><tr><th>ROI</th><th>Count</th><th>Details</th></tr></thead>
+                        <thead><tr><th style="width:30px;"><input type="checkbox" id="perfRoiSelectAll" title="Select all ROIs" checked></th><th>ROI</th><th>Count</th><th>Details</th></tr></thead>
                         <tbody></tbody>
                     </table>
+                    <p style="font-size:11px;color:#666;margin-top:4px;">Select ROIs above to filter the CSV export.</p>
                 </div>
             </div>
 
@@ -1456,6 +1459,8 @@
         }
 
         // ===== Performance Tab =====
+        let _perfRoiData = [];
+
         async function loadPerfSessions() {
             try {
                 const res = await fetch('/api/sessions');
@@ -1513,18 +1518,54 @@
                     tbody.appendChild(row);
                 }
 
-                // ROI section
+                // ROI section with multi-select
                 const roiSection = document.getElementById('perfRoiSection');
                 const roiTbody = document.querySelector('#perfByRoi tbody');
                 roiTbody.innerHTML = '';
-                if (data.roi_counts && data.roi_counts.length > 0) {
+                _perfRoiData = data.roi_counts || [];
+                if (_perfRoiData.length > 0) {
                     roiSection.style.display = '';
-                    for (const rc of data.roi_counts) {
+                    const selectAll = document.getElementById('perfRoiSelectAll');
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                    _perfRoiData.forEach((rc, idx) => {
                         const details = Object.entries(rc.by_class || {}).map(([c, n]) => `${c}: ${n}`).join(', ');
                         const row = document.createElement('tr');
-                        row.innerHTML = `<td>${rc.name}</td><td>${rc.count}</td><td style="font-size:12px;color:#aaa;">${details}</td>`;
+                        row.classList.add('roi-selected');
+                        // Build cells via DOM
+                        const tdCb = document.createElement('td');
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'perfRoiCheck';
+                        cb.dataset.roiIdx = idx;
+                        cb.checked = true;
+                        tdCb.appendChild(cb);
+                        const tdName = document.createElement('td');
+                        tdName.textContent = rc.name;
+                        const tdCount = document.createElement('td');
+                        tdCount.textContent = rc.count;
+                        const tdDetails = document.createElement('td');
+                        tdDetails.style.fontSize = '12px';
+                        tdDetails.style.color = '#aaa';
+                        tdDetails.textContent = details;
+                        row.append(tdCb, tdName, tdCount, tdDetails);
+                        cb.addEventListener('change', function() {
+                            row.classList.toggle('roi-selected', this.checked);
+                            const allBoxes = document.querySelectorAll('.perfRoiCheck');
+                            const allChecked = Array.from(allBoxes).every(c => c.checked);
+                            const noneChecked = Array.from(allBoxes).every(c => !c.checked);
+                            selectAll.checked = allChecked;
+                            selectAll.indeterminate = !allChecked && !noneChecked;
+                        });
                         roiTbody.appendChild(row);
-                    }
+                    });
+                    selectAll.onchange = function() {
+                        document.querySelectorAll('.perfRoiCheck').forEach(cb => {
+                            cb.checked = selectAll.checked;
+                            cb.closest('tr').classList.toggle('roi-selected', selectAll.checked);
+                        });
+                        selectAll.indeterminate = false;
+                    };
                 } else {
                     roiSection.style.display = 'none';
                 }
@@ -1536,7 +1577,14 @@
         function exportPerformanceCsv() {
             const sessionId = document.getElementById('perfSessionSelect').value;
             if (!sessionId) return;
-            window.open(`/api/performance/${encodeURIComponent(sessionId)}/csv`, '_blank');
+            let url = `/api/performance/${encodeURIComponent(sessionId)}/csv`;
+            // Collect selected ROI indices for filtered export
+            const checkedBoxes = document.querySelectorAll('.perfRoiCheck:checked');
+            if (checkedBoxes.length > 0 && checkedBoxes.length < _perfRoiData.length) {
+                const indices = Array.from(checkedBoxes).map(cb => cb.dataset.roiIdx);
+                url += '?rois=' + indices.join(',');
+            }
+            window.open(url, '_blank');
         }
 
         // ===== Init =====

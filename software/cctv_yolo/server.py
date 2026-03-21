@@ -998,7 +998,12 @@ def api_performance(session_id):
 
 @app.route("/api/performance/<session_id>/csv")
 def api_performance_csv(session_id):
-    """Export performance stats as CSV."""
+    """Export performance stats as CSV.
+
+    Optional query param ``rois`` accepts a comma-separated list of ROI
+    indices (0-based).  When provided, only tracks that fall inside at
+    least one of the selected ROIs are included in the export.
+    """
     data = _load_session_data(session_id)
     if not data:
         return jsonify({"error": "Session not found"}), 404
@@ -1006,38 +1011,59 @@ def api_performance_csv(session_id):
     tracks = data.get("tracks", [])
     rois = data.get("rois", [])
 
+    # Determine which ROIs are selected (if filtering requested)
+    roi_filter_param = request.args.get("rois", "")
+    selected_roi_indices = None
+    if roi_filter_param and rois:
+        try:
+            selected_roi_indices = [int(i) for i in roi_filter_param.split(",") if i.strip().isdigit()]
+            selected_roi_indices = [i for i in selected_roi_indices if 0 <= i < len(rois)]
+        except ValueError:
+            selected_roi_indices = None
+
+    # If ROI filtering is active, limit tracks to those inside selected ROIs
+    if selected_roi_indices is not None and len(selected_roi_indices) > 0:
+        selected_rois = [rois[i] for i in selected_roi_indices]
+        filtered_tracks = [t for t in tracks if any(_track_in_roi(t, r) for r in selected_rois)]
+    else:
+        filtered_tracks = tracks
+        selected_rois = rois
+
     output = io.StringIO()
     writer = csv.writer(output)
 
     # Summary section
     writer.writerow(["Session", session_id])
-    writer.writerow(["Total Vehicles", len(tracks)])
+    writer.writerow(["Total Vehicles", len(filtered_tracks)])
     writer.writerow(["Model", data.get("model", "")])
     writer.writerow(["Confidence Threshold", data.get("conf_threshold", "")])
     writer.writerow(["Processed At", data.get("processed_at", "")])
+    if selected_roi_indices is not None and len(selected_roi_indices) < len(rois):
+        roi_names = [rois[i].get("name", f"ROI {i}") for i in selected_roi_indices]
+        writer.writerow(["ROI Filter", ", ".join(roi_names)])
     writer.writerow([])
 
-    # By type
+    # By type (based on filtered tracks)
     writer.writerow(["Vehicle Type", "Count"])
     by_type = {}
-    for t in tracks:
+    for t in filtered_tracks:
         cls = t.get("class", "unknown")
         by_type[cls] = by_type.get(cls, 0) + 1
     for cls, count in sorted(by_type.items()):
         writer.writerow([cls, count])
     writer.writerow([])
 
-    # By ROI
-    if rois:
+    # By ROI (only selected ROIs)
+    if selected_rois:
         writer.writerow(["ROI Name", "Total Count"])
-        for roi in rois:
-            count = sum(1 for t in tracks if _track_in_roi(t, roi))
+        for roi in selected_rois:
+            count = sum(1 for t in filtered_tracks if _track_in_roi(t, roi))
             writer.writerow([roi.get("name", ""), count])
         writer.writerow([])
 
-    # Track detail
+    # Track detail (filtered)
     writer.writerow(["Track ID", "Class", "Start Frame", "End Frame", "Frames", "Avg Confidence"])
-    for t in tracks:
+    for t in filtered_tracks:
         writer.writerow([
             t.get("track_id", ""),
             t.get("class", ""),
