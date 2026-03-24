@@ -293,11 +293,11 @@ class CorrectionTab(QWidget):
         vbox.setContentsMargins(16, 12, 16, 12)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #8899aa; font-size: 11px; letter-spacing: 1px; border: none;")
+        lbl.setStyleSheet("color: #aabbcc; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
         lbl.setAlignment(Qt.AlignLeft)
 
         val = QLabel(value_text)
-        val.setStyleSheet(f"color: {ACCENT}; font-size: 36px; font-weight: bold; border: none;")
+        val.setStyleSheet(f"color: {ACCENT}; font-size: 36px; font-weight: bold; border: none; background: transparent;")
         val.setAlignment(Qt.AlignLeft)
 
         vbox.addWidget(lbl)

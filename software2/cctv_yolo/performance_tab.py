@@ -321,7 +321,7 @@ class PerformanceTab(QWidget):
         self.content_layout.addStretch()
 
     def _make_stat_card(self, label_text, value_text, color=None):
-        """Create a stat card widget and return dict with frame, value_label."""
+        """Create a stat card with visible labels on gradient background."""
         accent = color or ACCENT
         frame = QFrame()
         style = f"""
@@ -342,11 +342,11 @@ class PerformanceTab(QWidget):
         vbox.setContentsMargins(16, 12, 16, 12)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #8899aa; font-size: 11px; letter-spacing: 1px; border: none;")
+        lbl.setStyleSheet("color: #aabbcc; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
         lbl.setAlignment(Qt.AlignLeft)
 
         val = QLabel(value_text)
-        val.setStyleSheet(f"color: {accent}; font-size: 36px; font-weight: bold; border: none;")
+        val.setStyleSheet(f"color: {accent}; font-size: 36px; font-weight: bold; border: none; background: transparent;")
         val.setAlignment(Qt.AlignLeft)
 
         vbox.addWidget(lbl)
@@ -367,10 +367,14 @@ class PerformanceTab(QWidget):
 
         sessions = self.data_manager.get_sessions()
         for s in sessions:
+            sid = s.get("id", "")
             display = s.get("video_name", s.get("id", "Unknown"))
-            track_count = s.get("track_count", 0)
-            label = f"{display}  ({track_count} tracks)"
-            self.session_combo.addItem(label, s.get("id", ""))
+            # Use corrected track count if corrections exist
+            data = self.data_manager.load_session_data(sid)
+            track_count = len(data.get("tracks", [])) if data else s.get("track_count", 0)
+            suffix = " (corrected)" if s.get("has_corrections") else ""
+            label = f"{display}  ({track_count} tracks{suffix})"
+            self.session_combo.addItem(label, sid)
 
         self.session_combo.blockSignals(False)
 
