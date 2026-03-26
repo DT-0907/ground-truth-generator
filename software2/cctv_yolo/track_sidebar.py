@@ -187,6 +187,7 @@ class TrackSidebar(QWidget):
     back_requested = Signal()
     roi_delete_requested = Signal(int) # roi_id
     roi_rename_requested = Signal(int) # roi_id
+    roi_selection_changed = Signal()   # emitted when ROI checkboxes change
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,6 +202,8 @@ class TrackSidebar(QWidget):
         self._has_unsaved = False
         self._rois = []
         self._roi_track_ids = set()  # track IDs that pass through any ROI
+        self._selected_roi_indices = set()  # indices of ROIs selected via checkboxes
+        self._roi_checkboxes = []  # list of QCheckBox widgets for ROI items
 
         self._build_ui()
 
@@ -356,10 +359,18 @@ class TrackSidebar(QWidget):
         """Handle the 'In ROI only' checkbox toggle."""
         self.filter_changed.emit(self._current_filter)
         self.refresh_tracks()
+        self.roi_selection_changed.emit()
 
     def is_roi_filter_active(self):
-        """Return True if the ROI filter checkbox is checked and ROIs exist."""
+        """Return True if the ROI filter checkbox is checked and ROIs exist,
+        or if specific ROIs are selected via checkboxes."""
+        if self._selected_roi_indices:
+            return True
         return self._roi_filter_cb.isChecked() and bool(self._rois)
+
+    def get_selected_roi_indices(self):
+        """Return the set of currently selected ROI indices."""
+        return set(self._selected_roi_indices)
 
     def _update_filter_buttons(self):
         for name, btn in self._filter_buttons.items():
@@ -407,6 +418,12 @@ class TrackSidebar(QWidget):
         self._roi_filter_cb.setEnabled(has_rois)
         if not has_rois:
             self._roi_filter_cb.setChecked(False)
+            self._selected_roi_indices.clear()
+        else:
+            # Prune selected indices that are out of range after ROI deletion
+            self._selected_roi_indices = {i for i in self._selected_roi_indices if i < len(rois)}
+        # Reset checkbox reference list
+        self._roi_checkboxes = []
         # Clear existing ROI items
         while self._roi_list_layout.count():
             item = self._roi_list_layout.takeAt(0)
@@ -431,20 +448,37 @@ class TrackSidebar(QWidget):
     # ------------------------------------------------------------------
 
     def _compute_roi_track_ids(self):
-        """Return the set of track IDs whose bbox center falls inside any ROI."""
+        """Return the set of track IDs whose bbox center falls inside the active ROIs.
+
+        If specific ROIs are selected via checkboxes, only those are checked.
+        Otherwise (global 'In ROI only' checkbox), all ROIs are checked.
+        """
+        active_rois = self._get_active_rois()
         ids = set()
         for track in self._tracks:
             for fd in track.get("frames", []):
                 cx = (fd["bbox"][0] + fd["bbox"][2]) / 2
                 cy = (fd["bbox"][1] + fd["bbox"][3]) / 2
-                if self._point_in_any_roi(cx, cy):
+                if self._point_in_any_roi(cx, cy, active_rois):
                     ids.add(track.get("track_id"))
                     break
         return ids
 
-    def _point_in_any_roi(self, px, py):
-        """Check if a point falls inside any defined ROI."""
-        for roi in self._rois:
+    def _get_active_rois(self):
+        """Return the list of ROIs to use for filtering.
+
+        If specific ROI checkboxes are selected, return only those.
+        Otherwise return all ROIs.
+        """
+        if self._selected_roi_indices:
+            return [self._rois[i] for i in self._selected_roi_indices if i < len(self._rois)]
+        return self._rois
+
+    def _point_in_any_roi(self, px, py, rois=None):
+        """Check if a point falls inside any of the given ROIs."""
+        if rois is None:
+            rois = self._rois
+        for roi in rois:
             if roi.get("type") == "rect":
                 p1, p2 = roi["points"][0], roi["points"][1]
                 x1, y1 = p1["x"], p1["y"]
@@ -497,14 +531,26 @@ class TrackSidebar(QWidget):
         return inside
 
     def _create_roi_item(self, roi, stats, roi_index):
-        """Create a QFrame widget for a single ROI entry."""
+        """Create a QFrame widget for a single ROI entry with a selection checkbox."""
         frame = QFrame()
+        is_selected = roi_index in self._selected_roi_indices
+        border_style = f"border: 1px solid {roi.get('color', '#ff6b6b')};" if is_selected else ""
         frame.setStyleSheet(
-            "background: #1a1a2e; border-radius: 4px; padding: 6px 8px; margin-bottom: 2px;"
+            f"background: #1a1a2e; border-radius: 4px; padding: 6px 8px; margin-bottom: 2px; {border_style}"
         )
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
+
+        cb = QCheckBox()
+        cb.setChecked(is_selected)
+        cb.setToolTip("Select to filter canvas to this ROI")
+        cb.toggled.connect(lambda checked, idx=roi_index: self._on_roi_checkbox_toggled(idx, checked))
+        layout.addWidget(cb)
+        # Keep reference for later access
+        while len(self._roi_checkboxes) <= roi_index:
+            self._roi_checkboxes.append(None)
+        self._roi_checkboxes[roi_index] = cb
 
         color_dot = QLabel()
         color_dot.setFixedSize(10, 10)
@@ -530,6 +576,15 @@ class TrackSidebar(QWidget):
         layout.addWidget(del_btn)
 
         return frame
+
+    def _on_roi_checkbox_toggled(self, roi_index, checked):
+        """Handle toggling of an individual ROI checkbox."""
+        if checked:
+            self._selected_roi_indices.add(roi_index)
+        else:
+            self._selected_roi_indices.discard(roi_index)
+        self.refresh_tracks()
+        self.roi_selection_changed.emit()
 
     def _on_roi_delete(self, roi_id):
         self.roi_delete_requested.emit(roi_id)

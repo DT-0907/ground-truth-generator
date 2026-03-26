@@ -405,6 +405,7 @@ class ReviewWindow(QMainWindow):
         self.sidebar.save_requested.connect(self._save)
         self.sidebar.back_requested.connect(self.close)
         self.sidebar.roi_delete_requested.connect(self._delete_roi)
+        self.sidebar.roi_selection_changed.connect(self._on_roi_selection_changed)
 
     def _add_tool_button(self, text, checkable=False, checked=False):
         """Add a button to the toolbar and return it."""
@@ -991,6 +992,22 @@ class ReviewWindow(QMainWindow):
                 self._refresh_all()
                 self.status_bar.showMessage(f"ROI '{name}' deleted")
 
+    def _on_roi_selection_changed(self):
+        """Handle ROI checkbox selection changes — update canvas dimming."""
+        self._apply_roi_filter()
+
+    def _apply_roi_filter(self):
+        """Compute dimmed track IDs based on sidebar ROI filter state and update canvas."""
+        if self.sidebar.is_roi_filter_active():
+            roi_ids = self.sidebar.get_roi_track_ids()
+            self.canvas.dimmed_track_ids = {
+                t.get("track_id") for t in self.tracks
+                if t.get("track_id") not in roi_ids
+            }
+        else:
+            self.canvas.dimmed_track_ids = set()
+        self.canvas.update()
+
     # ------------------------------------------------------------------
     # Next review
     # ------------------------------------------------------------------
@@ -1073,17 +1090,7 @@ class ReviewWindow(QMainWindow):
         """Refresh the sidebar with current state."""
         self.sidebar.set_tracks(self.tracks, self.current_frame, self.selected_track_id)
         self.sidebar.set_rois(self.rois, self.tracks)
-
-        # Dim tracks outside selected ROIs when ROI filter is active
-        if self.sidebar.is_roi_filter_active():
-            roi_ids = self.sidebar.get_roi_track_ids()
-            self.canvas.dimmed_track_ids = {
-                t.get("track_id") for t in self.tracks
-                if t.get("track_id") not in roi_ids
-            }
-        else:
-            self.canvas.dimmed_track_ids = set()
-        self.canvas.update()
+        self._apply_roi_filter()
 
     def _refresh_all(self):
         """Refresh both canvas and sidebar."""
