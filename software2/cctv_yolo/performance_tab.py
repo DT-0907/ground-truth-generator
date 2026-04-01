@@ -434,11 +434,12 @@ class PerformanceTab(QWidget):
             roi_name = roi.get("name", "Unknown")
             roi_type = roi.get("type", "rect")
             points = roi.get("points", [])
-            count = self._count_tracks_in_roi(tracks, roi_type, points)
+            result = self._count_tracks_in_roi(tracks, roi_type, points)
             roi_counts.append({
                 "name": roi_name,
                 "type": roi_type,
-                "count": count,
+                "count": result["total"],
+                "by_class": result["by_class"],
             })
 
         self._current_stats = {
@@ -452,20 +453,26 @@ class PerformanceTab(QWidget):
         self.btn_export_csv.setEnabled(True)
 
     def _count_tracks_in_roi(self, tracks, roi_type, points):
-        """Count how many tracks have at least one detection inside the ROI."""
-        if not points:
-            return 0
+        """Count how many tracks have at least one detection inside the ROI.
 
-        count = 0
+        Returns a dict with 'total' count and 'by_class' breakdown.
+        """
+        if not points:
+            return {"total": 0, "by_class": {}}
+
+        total = 0
+        by_class = {}
         for track in tracks:
             for fd in track.get("frames", []):
                 bbox = fd.get("bbox", [0, 0, 0, 0])
                 cx = (bbox[0] + bbox[2]) / 2.0
                 cy = (bbox[1] + bbox[3]) / 2.0
                 if self._point_in_roi(cx, cy, roi_type, points):
-                    count += 1
+                    total += 1
+                    cls = track.get("class", "vehicle")
+                    by_class[cls] = by_class.get(cls, 0) + 1
                     break  # count each track only once
-        return count
+        return {"total": total, "by_class": by_class}
 
     def _point_in_roi(self, x, y, roi_type, points):
         """Check if a point (x, y) is inside the given ROI."""
@@ -601,14 +608,18 @@ class PerformanceTab(QWidget):
             roi_section.setStyleSheet(SECTION_LABEL)
             self.content_layout.addWidget(roi_section)
 
+            # Columns: ROI Name, Type, Total, Car, Truck, Bus, Motorcycle, Bicycle
+            vehicle_types = ["car", "truck", "bus", "motorcycle", "bicycle"]
+            col_headers = ["ROI Name", "Type", "Total"] + [v.capitalize() for v in vehicle_types]
+
             self.roi_table = QTableWidget()
             self.roi_table.setStyleSheet(TABLE_STYLE)
-            self.roi_table.setColumnCount(3)
-            self.roi_table.setHorizontalHeaderLabels(["ROI Name", "Type", "Vehicles"])
+            self.roi_table.setColumnCount(len(col_headers))
+            self.roi_table.setHorizontalHeaderLabels(col_headers)
             self.roi_table.horizontalHeader().setStretchLastSection(True)
             self.roi_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            self.roi_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            self.roi_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            for c in range(1, len(col_headers)):
+                self.roi_table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
             self.roi_table.verticalHeader().setVisible(False)
             self.roi_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.roi_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -618,11 +629,18 @@ class PerformanceTab(QWidget):
             for row, roi in enumerate(roi_counts):
                 name_item = QTableWidgetItem(roi["name"])
                 type_item = QTableWidgetItem(roi["type"].capitalize())
-                count_item = QTableWidgetItem(str(roi["count"]))
-                count_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                total_item = QTableWidgetItem(str(roi["count"]))
+                total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.roi_table.setItem(row, 0, name_item)
                 self.roi_table.setItem(row, 1, type_item)
-                self.roi_table.setItem(row, 2, count_item)
+                self.roi_table.setItem(row, 2, total_item)
+
+                by_class = roi.get("by_class", {})
+                for col_idx, vtype in enumerate(vehicle_types):
+                    vcount = by_class.get(vtype, 0)
+                    item = QTableWidgetItem(str(vcount) if vcount > 0 else "-")
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.roi_table.setItem(row, 3 + col_idx, item)
 
             self.roi_table.setFixedHeight(max(50, 30 + len(roi_counts) * 35))
             self.content_layout.addWidget(self.roi_table)
@@ -844,13 +862,17 @@ class PerformanceTab(QWidget):
                 writer.writerow(["Total", total, "100.0%"])
                 writer.writerow([])
 
-                # ROI counts
+                # ROI counts with per-vehicle-type breakdown
                 roi_counts = self._current_stats.get("roi_counts", [])
                 if roi_counts:
+                    vehicle_types = ["car", "truck", "bus", "motorcycle", "bicycle"]
                     writer.writerow(["ROI Counts"])
-                    writer.writerow(["ROI Name", "Type", "Vehicles"])
+                    writer.writerow(["ROI Name", "Type", "Total"] + [v.capitalize() for v in vehicle_types])
                     for roi in roi_counts:
-                        writer.writerow([roi["name"], roi["type"].capitalize(), roi["count"]])
+                        by_class = roi.get("by_class", {})
+                        row_data = [roi["name"], roi["type"].capitalize(), roi["count"]]
+                        row_data += [by_class.get(v, 0) for v in vehicle_types]
+                        writer.writerow(row_data)
 
             QMessageBox.information(self, "Export Complete",
                                     f"Stats exported to:\n{file_path}\n\n{filter_desc}\nTotal: {total} vehicles")

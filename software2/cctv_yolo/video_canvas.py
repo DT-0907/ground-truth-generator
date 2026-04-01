@@ -212,6 +212,11 @@ class VideoCanvas(QWidget):
         self._update_display_rect()
         super().resizeEvent(event)
 
+    def showEvent(self, event):
+        """Recalculate display rect when the widget becomes visible."""
+        self._update_display_rect()
+        super().showEvent(event)
+
     def _canvas_to_video(self, cx, cy):
         """Convert canvas (widget) coordinates to video pixel coordinates."""
         dr = self._display_rect

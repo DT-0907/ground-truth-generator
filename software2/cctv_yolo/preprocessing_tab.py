@@ -444,8 +444,8 @@ class PreprocessingTab(QWidget):
 
         # VideoCanvas for preview
         self.preview_canvas = VideoCanvas()
-        self.preview_canvas.setMinimumHeight(240)
-        self.preview_canvas.setMaximumHeight(360)
+        self.preview_canvas.setMinimumHeight(400)
+        self.preview_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.preview_canvas.roi_rect_drawn.connect(self._on_roi_rect_drawn)
         self.preview_canvas.roi_polygon_drawn.connect(self._on_roi_polygon_drawn)
         roi_panel_layout.addWidget(self.preview_canvas)

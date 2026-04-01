@@ -5,9 +5,24 @@ Video processor: Detection + Tracking pipeline using Ultralytics.
 import json
 import cv2
 import numpy as np
+import torch
 from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
+
+
+def _get_device():
+    """Detect the best available device: CUDA GPU, Apple MPS, or CPU."""
+    if torch.cuda.is_available():
+        count = torch.cuda.device_count()
+        name = torch.cuda.get_device_name(0)
+        print(f"GPU detected: {name} ({count} device(s))")
+        return "cuda:0"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        print("Apple MPS (Metal) detected")
+        return "mps"
+    print("No GPU detected, using CPU")
+    return "cpu"
 
 
 # COCO vehicle class IDs
@@ -114,6 +129,11 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             f"  {_models_dir}\n\n"
             f"Original error: {e}"
         ) from e
+
+    # Select best available device (GPU > MPS > CPU)
+    device = _get_device()
+    model.to(device)
+    print(f"Model loaded on device: {device}")
 
     # Open video
     cap = cv2.VideoCapture(str(video_path))

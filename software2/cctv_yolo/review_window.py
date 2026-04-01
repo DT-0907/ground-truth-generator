@@ -34,6 +34,7 @@ from cctv_yolo.dialogs import (
     MergeDialog,
     NewTrackDialog,
     RoiNameDialog,
+    RenameRoiDialog,
 )
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,7 @@ class ReviewWindow(QMainWindow):
         self.sidebar.save_requested.connect(self._save)
         self.sidebar.back_requested.connect(self.close)
         self.sidebar.roi_delete_requested.connect(self._delete_roi)
+        self.sidebar.roi_rename_requested.connect(self._rename_roi)
         self.sidebar.roi_selection_changed.connect(self._on_roi_selection_changed)
 
     def _add_tool_button(self, text, checkable=False, checked=False):
@@ -991,6 +993,20 @@ class ReviewWindow(QMainWindow):
                 self._mark_unsaved()
                 self._refresh_all()
                 self.status_bar.showMessage(f"ROI '{name}' deleted")
+
+    def _rename_roi(self, roi_index):
+        """Rename an existing ROI."""
+        if 0 <= roi_index < len(self.rois):
+            current_name = self.rois[roi_index].get("name", f"ROI {roi_index}")
+            dlg = RenameRoiDialog(current_name, self)
+            if dlg.exec() == RenameRoiDialog.Accepted:
+                new_name = dlg.new_name()
+                if new_name:
+                    self.rois[roi_index]["name"] = new_name
+                    self._push_undo()
+                    self._mark_unsaved()
+                    self._refresh_all()
+                    self.status_bar.showMessage(f"ROI renamed to '{new_name}'")
 
     def _on_roi_selection_changed(self):
         """Handle ROI checkbox selection changes — update canvas dimming."""

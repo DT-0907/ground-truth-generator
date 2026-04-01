@@ -567,6 +567,15 @@ class TrackSidebar(QWidget):
         count.setStyleSheet("font-size: 11px; color: #aaa;")
         layout.addWidget(count)
 
+        rename_btn = QPushButton("edit")
+        rename_btn.setFixedSize(30, 20)
+        rename_btn.setStyleSheet(
+            "background: transparent; color: #4ecca3; font-size: 10px; padding: 0;"
+        )
+        rename_btn.setToolTip("Rename this ROI")
+        rename_btn.clicked.connect(lambda checked=False, idx=roi_index: self._on_roi_rename(idx))
+        layout.addWidget(rename_btn)
+
         del_btn = QPushButton("x")
         del_btn.setFixedSize(20, 20)
         del_btn.setStyleSheet(
@@ -585,6 +594,9 @@ class TrackSidebar(QWidget):
             self._selected_roi_indices.discard(roi_index)
         self.refresh_tracks()
         self.roi_selection_changed.emit()
+
+    def _on_roi_rename(self, roi_id):
+        self.roi_rename_requested.emit(roi_id)
 
     def _on_roi_delete(self, roi_id):
         self.roi_delete_requested.emit(roi_id)
