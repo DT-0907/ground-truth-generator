@@ -363,15 +363,22 @@ class VideoCanvas(QWidget):
             color = QColor(CLASS_COLORS.get(class_name, CLASS_COLORS["unknown"]))
             is_selected = track_id == self.selected_track_id
             is_interpolated = frame_data.get("interpolated", False)
+            is_occluded = frame_data.get("occluded", False)
 
             # Reduce opacity for dimmed (outside ROI) tracks
             if is_dimmed:
                 color.setAlpha(40)
 
-            # Bounding box outline
-            pen = QPen(color, 4 if is_selected else 2)
-            if is_interpolated:
-                pen.setStyle(Qt.DashLine)
+            # Bounding box outline. Occluded segments use a thicker
+            # dotted pen in pink so they're visually unmistakable.
+            if is_occluded:
+                occluded_color = QColor("#ff64c8")
+                pen = QPen(occluded_color, 4 if is_selected else 3)
+                pen.setStyle(Qt.DotLine)
+            else:
+                pen = QPen(color, 4 if is_selected else 2)
+                if is_interpolated:
+                    pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(QRectF(sx1, sy1, sw, sh))
@@ -384,7 +391,12 @@ class VideoCanvas(QWidget):
 
             # Label above the box
             if not is_dimmed:
-                interp_suffix = " [interp]" if is_interpolated else ""
+                if is_occluded:
+                    interp_suffix = " [occluded]"
+                elif is_interpolated:
+                    interp_suffix = " [interp]"
+                else:
+                    interp_suffix = ""
                 label = f"#{track.get('track_id', '?')} {class_name}{interp_suffix}"
                 text_w = fm.horizontalAdvance(label) + 8
 

@@ -7,6 +7,16 @@ from PySide6.QtCore import Qt
 
 VEHICLE_CLASSES = ["car", "truck", "bus", "motorcycle", "bicycle"]
 
+# Finer-grained subclasses keyed by primary class. Used to refine
+# annotations beyond the COCO supercategory. ``""`` means "unspecified".
+VEHICLE_SUBCLASSES = {
+    "car": ["", "sedan", "suv", "hatchback", "coupe", "minivan", "wagon"],
+    "truck": ["", "pickup", "box_truck", "flatbed", "semi", "tow_truck", "garbage_truck", "delivery_van"],
+    "bus": ["", "city_bus", "school_bus", "coach", "shuttle"],
+    "motorcycle": ["", "sport", "cruiser", "scooter", "moped"],
+    "bicycle": ["", "road", "mountain", "ebike", "cargo"],
+}
+
 # Dark theme stylesheet for dialogs
 DIALOG_STYLE = """
 QDialog {
@@ -61,24 +71,33 @@ QPushButton#confirm:hover {
 
 
 class ClassChangeDialog(QDialog):
-    """Dialog to change a track's vehicle class."""
+    """Dialog to change a track's vehicle class and optional subclass."""
 
-    def __init__(self, current_class: str = "car", parent=None):
+    def __init__(self, current_class: str = "car", current_subclass: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("Change Class")
-        self.setFixedWidth(300)
+        self.setFixedWidth(320)
         self.setStyleSheet(DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
 
-        layout.addWidget(QLabel("Select vehicle class:"))
-
+        layout.addWidget(QLabel("Vehicle class:"))
         self.combo = QComboBox()
         self.combo.addItems(VEHICLE_CLASSES)
         idx = VEHICLE_CLASSES.index(current_class) if current_class in VEHICLE_CLASSES else 0
         self.combo.setCurrentIndex(idx)
+        self.combo.currentTextChanged.connect(self._reload_subclasses)
         layout.addWidget(self.combo)
+
+        layout.addWidget(QLabel("Subclass (optional):"))
+        self.sub_combo = QComboBox()
+        layout.addWidget(self.sub_combo)
+        self._reload_subclasses(self.combo.currentText())
+        if current_subclass:
+            ix = self.sub_combo.findText(current_subclass)
+            if ix >= 0:
+                self.sub_combo.setCurrentIndex(ix)
 
         btn_layout = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
@@ -91,8 +110,15 @@ class ClassChangeDialog(QDialog):
         btn_layout.addWidget(confirm_btn)
         layout.addLayout(btn_layout)
 
+    def _reload_subclasses(self, cls: str):
+        self.sub_combo.clear()
+        self.sub_combo.addItems(VEHICLE_SUBCLASSES.get(cls, [""]))
+
     def selected_class(self) -> str:
         return self.combo.currentText()
+
+    def selected_subclass(self) -> str:
+        return self.sub_combo.currentText()
 
 
 class MergeDialog(QDialog):

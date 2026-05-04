@@ -27,6 +27,13 @@ from cctv_yolo.data_manager import DataManager
 from cctv_yolo.preprocessing_tab import PreprocessingTab
 from cctv_yolo.correction_tab import CorrectionTab
 from cctv_yolo.performance_tab import PerformanceTab
+from cctv_yolo.batch_tab import BatchTab
+from cctv_yolo.analytics_tab import AnalyticsTab
+from cctv_yolo.training_tab import TrainingTab
+from cctv_yolo.models_tab import ModelsTab
+from cctv_yolo.live_tab import LiveTab
+from cctv_yolo.insights_tab import InsightsTab
+from cctv_yolo.search_dialog import CrossSessionSearchDialog
 from cctv_yolo.settings_dialog import SettingsDialog
 from cctv_yolo.review_window import ReviewWindow
 
@@ -111,16 +118,31 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self.preprocessing_tab = PreprocessingTab(self.data_manager)
+        self.batch_tab = BatchTab(self.data_manager)
         self.correction_tab = CorrectionTab(self.data_manager)
         self.performance_tab = PerformanceTab(self.data_manager)
+        self.analytics_tab = AnalyticsTab(self.data_manager)
+        self.training_tab = TrainingTab(self.data_manager)
+        self.models_tab = ModelsTab(self.data_manager)
+        self.live_tab = LiveTab(self.data_manager)
+        self.insights_tab = InsightsTab(self.data_manager)
 
         self.tabs.addTab(self.preprocessing_tab, "Preprocessing")
+        self.tabs.addTab(self.batch_tab, "Batch")
         self.tabs.addTab(self.correction_tab, "Correction")
         self.tabs.addTab(self.performance_tab, "Performance")
+        self.tabs.addTab(self.analytics_tab, "Analytics")
+        self.tabs.addTab(self.insights_tab, "Insights")
+        self.tabs.addTab(self.training_tab, "Training")
+        self.tabs.addTab(self.models_tab, "Models")
+        self.tabs.addTab(self.live_tab, "Live")
 
         # Connect signals
         self.preprocessing_tab.review_requested.connect(self.open_review)
         self.correction_tab.review_requested.connect(self.open_review)
+        self.batch_tab.review_requested.connect(self.open_review)
+        self.training_tab.review_requested.connect(self.open_review)
+        self.insights_tab.review_requested.connect(self.open_review)
 
         # --- Status bar ---
         self.status = QStatusBar()
@@ -151,6 +173,11 @@ class MainWindow(QMainWindow):
         action_open_data.triggered.connect(lambda: self.data_manager.open_folder("data"))
         file_menu.addAction(action_open_data)
 
+        action_search = QAction("Cross-session Search…", self)
+        action_search.setShortcut(QKeySequence("Ctrl+F"))
+        action_search.triggered.connect(self._open_search)
+        file_menu.addAction(action_search)
+
         file_menu.addSeparator()
 
         action_settings = QAction("Settings...", self)
@@ -175,13 +202,43 @@ class MainWindow(QMainWindow):
 
         action_correction = QAction("Correction", self)
         action_correction.setShortcut(QKeySequence("Ctrl+2"))
-        action_correction.triggered.connect(lambda: self.tabs.setCurrentIndex(1))
+        action_correction.triggered.connect(lambda: self.tabs.setCurrentIndex(2))
         view_menu.addAction(action_correction)
 
         action_performance = QAction("Performance", self)
         action_performance.setShortcut(QKeySequence("Ctrl+3"))
-        action_performance.triggered.connect(lambda: self.tabs.setCurrentIndex(2))
+        action_performance.triggered.connect(lambda: self.tabs.setCurrentIndex(3))
         view_menu.addAction(action_performance)
+
+        action_batch = QAction("Batch", self)
+        action_batch.setShortcut(QKeySequence("Ctrl+4"))
+        action_batch.triggered.connect(lambda: self.tabs.setCurrentIndex(1))
+        view_menu.addAction(action_batch)
+
+        action_analytics = QAction("Analytics", self)
+        action_analytics.setShortcut(QKeySequence("Ctrl+5"))
+        action_analytics.triggered.connect(lambda: self.tabs.setCurrentIndex(4))
+        view_menu.addAction(action_analytics)
+
+        action_insights = QAction("Insights", self)
+        action_insights.setShortcut(QKeySequence("Ctrl+9"))
+        action_insights.triggered.connect(lambda: self.tabs.setCurrentIndex(5))
+        view_menu.addAction(action_insights)
+
+        action_training = QAction("Training", self)
+        action_training.setShortcut(QKeySequence("Ctrl+6"))
+        action_training.triggered.connect(lambda: self.tabs.setCurrentIndex(6))
+        view_menu.addAction(action_training)
+
+        action_models = QAction("Models", self)
+        action_models.setShortcut(QKeySequence("Ctrl+7"))
+        action_models.triggered.connect(lambda: self.tabs.setCurrentIndex(7))
+        view_menu.addAction(action_models)
+
+        action_live = QAction("Live", self)
+        action_live.setShortcut(QKeySequence("Ctrl+8"))
+        action_live.triggered.connect(lambda: self.tabs.setCurrentIndex(8))
+        view_menu.addAction(action_live)
 
         # --- Help menu ---
         help_menu = menubar.addMenu("Help")
@@ -245,6 +302,12 @@ class MainWindow(QMainWindow):
         self.preprocessing_tab.refresh()
         self.correction_tab.refresh()
         self.performance_tab.refresh()
+        self.batch_tab.refresh()
+        self.analytics_tab.refresh()
+        self.training_tab.refresh()
+        self.models_tab.refresh()
+        self.live_tab.refresh()
+        self.insights_tab.refresh()
 
     # ------------------------------------------------------------------
     # Mode changes
@@ -257,7 +320,20 @@ class MainWindow(QMainWindow):
         self.preprocessing_tab.refresh()
         self.correction_tab.refresh()
         self.performance_tab.refresh()
+        self.batch_tab.refresh()
+        self.analytics_tab.refresh()
+        self.training_tab.refresh()
+        self.models_tab.refresh()
+        self.live_tab.refresh()
+        self.insights_tab.refresh()
         self.status.showMessage(f"Switched to {mode.upper()} mode")
+
+    def _open_search(self):
+        """Open the cross-session track search dialog."""
+        dlg = CrossSessionSearchDialog(self.data_manager, parent=self)
+        dlg.open_review.connect(self.open_review)
+        run = getattr(dlg, "exec")
+        run()
 
     def _update_mode_badge(self):
         """Update the mode badge in the status bar."""
@@ -373,4 +449,11 @@ class MainWindow(QMainWindow):
             rw.unsaved = False  # prevent individual close warnings
             rw.close()
         self._review_windows.clear()
+
+        # Stop batch queue + watch folders so the app exits cleanly
+        try:
+            self.batch_tab.shutdown()
+        except Exception:
+            pass
+
         event.accept()

@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 
 from cctv_yolo.video_canvas import VideoCanvas
 from cctv_yolo.track_sidebar import TrackSidebar
+from cctv_yolo.timeline_minimap import TimelineMinimap
+from cctv_yolo.occlusion_dialog import OcclusionSuggestionsDialog
 from cctv_yolo.dialogs import (
     ClassChangeDialog,
     MergeDialog,
@@ -283,6 +285,7 @@ class ReviewWindow(QMainWindow):
         self.toolbar.addSeparator()
 
         self.btn_next_review = self._add_tool_button("Next Review (R)")
+        self.btn_occlusion = self._add_tool_button("Find Occlusions")
         self.lbl_review_progress = QLabel("")
         self.lbl_review_progress.setStyleSheet(f"color: {ACCENT}; padding: 0 8px;")
         self.toolbar.addWidget(self.lbl_review_progress)
@@ -303,6 +306,7 @@ class ReviewWindow(QMainWindow):
         self.btn_copy_next.triggered.connect(self._copy_to_next)
         self.btn_copy_prev.triggered.connect(self._copy_to_prev)
         self.btn_next_review.triggered.connect(self._next_review)
+        self.btn_occlusion.triggered.connect(self._open_occlusion_dialog)
         self.btn_roi_rect.triggered.connect(lambda: self._set_mode("roi_rect"))
         self.btn_roi_poly.triggered.connect(lambda: self._set_mode("roi_polygon"))
 
@@ -376,6 +380,11 @@ class ReviewWindow(QMainWindow):
         frame_layout.addWidget(self.btn_step_fwd)
         frame_layout.addWidget(self.frame_slider, stretch=1)
         frame_layout.addWidget(self.lbl_frame_info)
+
+        # --- Timeline minimap (above frame bar) ---
+        self.minimap = TimelineMinimap()
+        self.minimap.frame_clicked.connect(self._go_to_frame)
+        root_layout.addWidget(self.minimap)
 
         root_layout.addWidget(frame_bar)
 
@@ -500,6 +509,10 @@ class ReviewWindow(QMainWindow):
         # Update the UI
         self._go_to_frame(0)
         self._update_review_progress()
+        self.minimap.set_data(
+            {"tracks": self.tracks, "rois": self.rois},
+            self.total_frames,
+        )
         self.setWindowTitle(f"Review — {self.video_name or self.session_id}")
 
     # ------------------------------------------------------------------
@@ -556,6 +569,10 @@ class ReviewWindow(QMainWindow):
         self.frame_spin.blockSignals(False)
 
         self.lbl_frame_info.setText(f"Frame {frame_num} / {self.total_frames}")
+
+        # Update minimap playhead
+        if hasattr(self, "minimap"):
+            self.minimap.set_current_frame(frame_num)
 
         # Update sidebar — lightweight during playback to avoid stutter
         self.sidebar.set_current_frame(frame_num)
@@ -712,14 +729,91 @@ class ReviewWindow(QMainWindow):
         track = self._find_track(self.selected_track_id)
         if not track:
             return
-        dlg = ClassChangeDialog(track.get("class", "car"), self)
+        dlg = ClassChangeDialog(
+            track.get("class", "car"),
+            track.get("subclass", "") or "",
+            self,
+        )
         if dlg.exec() == ClassChangeDialog.Accepted:
             new_class = dlg.selected_class()
+            new_sub = dlg.selected_subclass()
             track["class"] = new_class
+            if new_sub:
+                track["subclass"] = new_sub
+            else:
+                track.pop("subclass", None)
             self._push_undo()
             self._mark_unsaved()
             self._refresh_all()
-            self.status_bar.showMessage(f"Track #{self.selected_track_id} class changed to {new_class}")
+            label = new_class + ("/" + new_sub if new_sub else "")
+            self.status_bar.showMessage(
+                "Track #" + str(self.selected_track_id) + " class -> " + label
+            )
+
+    def _open_occlusion_dialog(self):
+        """Run gap-candidate detection and let the reviewer accept merges."""
+        track_data = {"tracks": self.tracks, "rois": self.rois}
+        dlg = OcclusionSuggestionsDialog(track_data, self)
+        dlg.apply_pair.connect(self._merge_pair_for_occlusion)
+        dlg.show_pair.connect(self._focus_track)
+        run = getattr(dlg, "exec")
+        run()
+
+    def _focus_track(self, track_id: int):
+        """Select a track and seek to its first frame so the reviewer
+        can eyeball it before accepting a merge."""
+        track = self._find_track(track_id)
+        if not track or not track.get("frames"):
+            return
+        self.selected_track_id = track_id
+        first_frame = sorted(track["frames"], key=lambda f: f["frame"])[0]["frame"]
+        self._go_to_frame(first_frame)
+
+    def _merge_pair_for_occlusion(self, source_id: int, target_id: int):
+        """Programmatically merge two tracks (used by the occlusion
+        dialog). Identical to ``_merge_tracks`` but driven by IDs and
+        marks the new interpolated frames as ``occluded``."""
+        source = self._find_track(source_id)
+        target = self._find_track(target_id)
+        if not source or not target:
+            return
+
+        source_frames = sorted(source.get("frames", []), key=lambda f: f["frame"])
+        target_frames = sorted(target.get("frames", []), key=lambda f: f["frame"])
+
+        all_frames = source_frames + target_frames
+        all_frames.sort(key=lambda f: f["frame"])
+        seen = {}
+        for fd in all_frames:
+            fn = fd["frame"]
+            if fn not in seen or fd.get("conf", 0) > seen[fn].get("conf", 0):
+                seen[fn] = fd
+        merged_frames = sorted(seen.values(), key=lambda f: f["frame"])
+
+        if source_frames and target_frames:
+            if source_frames[-1]["frame"] < target_frames[0]["frame"]:
+                interp = interpolate_frames(source_frames, target_frames)
+            elif target_frames[-1]["frame"] < source_frames[0]["frame"]:
+                interp = interpolate_frames(target_frames, source_frames)
+            else:
+                interp = []
+            # Mark every newly-added interpolated frame as occluded
+            for fd in interp:
+                fd["occluded"] = True
+            merged_frames = merged_frames + interp
+
+        merged_frames.sort(key=lambda f: f["frame"])
+        target["frames"] = merged_frames
+        self.tracks = [t for t in self.tracks if t.get("track_id") != source_id]
+        if self.selected_track_id == source_id:
+            self.selected_track_id = target_id
+
+        self._push_undo()
+        self._mark_unsaved()
+        self._refresh_all()
+        self.status_bar.showMessage(
+            "Occlusion-merged #" + str(source_id) + " into #" + str(target_id)
+        )
 
     def _merge_tracks(self):
         """Merge selected track with another track (with gap interpolation)."""
@@ -1116,6 +1210,11 @@ class ReviewWindow(QMainWindow):
         self.canvas.current_frame = self.current_frame
         self.canvas.update()
         self._refresh_sidebar()
+        if hasattr(self, "minimap"):
+            self.minimap.set_data(
+                {"tracks": self.tracks, "rois": self.rois},
+                self.total_frames,
+            )
 
     # ------------------------------------------------------------------
     # Close event
