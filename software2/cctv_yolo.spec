@@ -11,14 +11,8 @@ import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-# Bump recursion limit — torch + ultralytics + PySide6 hit the default 1000.
 sys.setrecursionlimit(10000)
 
-# ---- Collection helpers ---------------------------------------------------
-# Each of these libs has its own native files (Qt plugins, DLLs, YAML configs)
-# that PyInstaller's analyzer doesn't pick up automatically. Without these,
-# the exe builds but crashes silently at startup with "Could not find Qt
-# platform plugin 'windows'" or "ModuleNotFoundError: ultralytics.cfg".
 ultralytics_datas = collect_data_files('ultralytics')
 ultralytics_hiddenimports = collect_submodules('ultralytics')
 
