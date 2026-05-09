@@ -13,44 +13,39 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 sys.setrecursionlimit(10000)
 
+# ultralytics ships YAML configs (bytetrack.yaml, default.yaml) that aren't
+# importable Python — collect_data_files grabs them so YOLO can find them
+# at runtime. PySide6 / cv2 / torch are deliberately NOT manually collected:
+# PyInstaller has well-tested hooks for those, and double-collecting them
+# can produce conflicting copies of qwindows.dll or c10.dll.
 ultralytics_datas = collect_data_files('ultralytics')
 ultralytics_hiddenimports = collect_submodules('ultralytics')
 
-pyside_datas = collect_data_files('PySide6')
-pyside_hiddenimports = collect_submodules('PySide6')
-
-cv2_datas = collect_data_files('cv2')
-
-# Pull every cctv_yolo module — the package is loaded via dynamic tab imports
-# so PyInstaller's static analysis misses about 30 of them.
+# Pull every cctv_yolo module — tabs are loaded via dynamic imports so
+# PyInstaller's static analysis misses about 30 of them.
 cctv_hiddenimports = collect_submodules('cctv_yolo')
-
-# Torch ships its DLLs as binaries; collect_dynamic_libs handles that, but on
-# Windows we also need the version file and a few configs.
-try:
-    from PyInstaller.utils.hooks import collect_dynamic_libs
-    torch_binaries = collect_dynamic_libs('torch')
-except Exception:
-    torch_binaries = []
 
 a = Analysis(
     ['cctv_yolo/main.py'],
     pathex=[],
-    binaries=torch_binaries,
-    datas=ultralytics_datas + pyside_datas + cv2_datas,
-    hiddenimports=cctv_hiddenimports + ultralytics_hiddenimports + pyside_hiddenimports + [
+    binaries=[],
+    datas=ultralytics_datas,
+    hiddenimports=cctv_hiddenimports + ultralytics_hiddenimports + [
         'cv2',
         'numpy',
         'tqdm',
         'ultralytics',
         'torch',
         'torchvision',
+        'PySide6',
+        'PySide6.QtCore',
+        'PySide6.QtGui',
+        'PySide6.QtWidgets',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['runtime_hook.py'],
     excludes=[
-        # Cut analysis time + binary size — none of these are imported.
         'tkinter',
         'matplotlib',
         'IPython',
@@ -60,7 +55,6 @@ a = Analysis(
         'scipy',
         'sklearn',
         'PIL.ImageQt',
-        # PyQt5/6 collide with PySide6 if both are present in the venv.
         'PyQt5',
         'PyQt6',
     ],
@@ -109,8 +103,9 @@ if sys.platform == 'darwin':
         },
     )
 else:
-    # Windows / Linux. console=True keeps the console open so the user sees
-    # any startup error instead of a silent flash. Flip to False once stable.
+    # Windows / Linux. console=True keeps the console open so any startup
+    # error (missing DLL, import failure) is visible instead of a silent
+    # flash — and crash.log captures it for next time too.
     exe = EXE(
         pyz,
         a.scripts,

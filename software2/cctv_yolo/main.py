@@ -4,10 +4,19 @@ Entry point for the CCTV-YOLO native desktop application.
 Creates the QApplication, applies the dark Fusion palette,
 ensures data directories exist, and launches the main window.
 """
+import os
 import sys
+import traceback
+from pathlib import Path
+
+# OpenMP duplicate-library guard for Windows builds where torch + numpy both
+# load libiomp5md.dll. Setting it here too (in addition to the runtime hook)
+# covers `python -m cctv_yolo.main` dev runs.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cctv_yolo.data_manager import DataManager
 from cctv_yolo.main_window import MainWindow
@@ -237,5 +246,36 @@ def main():
     sys.exit(app.exec())
 
 
+def _write_crash_log(exc_text: str) -> Path:
+    """Persist a crash traceback so the user can see what blew up.
+
+    The exe runs with console=True on Windows, but if the user double-clicks
+    they may miss the console flash — the log is the durable record.
+    """
+    log = Path.home() / "Documents" / "CCTV-YOLO" / "crash.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(exc_text)
+    return log
+
+
+def _show_crash_dialog(message: str) -> None:
+    """Best-effort GUI popup so a double-clicked exe still tells the user."""
+    try:
+        instance = QApplication.instance()
+        if instance is None:
+            instance = QApplication(sys.argv)
+        QMessageBox.critical(None, "CCTV-YOLO crashed", message)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        tb = traceback.format_exc()
+        log_path = _write_crash_log(tb)
+        _show_crash_dialog(f"{tb}\n\nFull log: {log_path}")
+        print(tb, file=sys.stderr)
+        print(f"\nCrash log written to: {log_path}", file=sys.stderr)
+        sys.exit(1)
