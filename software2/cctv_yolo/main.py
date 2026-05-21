@@ -14,12 +14,12 @@ from pathlib import Path
 # covers `python -m cctv_yolo.main` dev runs.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtWidgets import QApplication, QMessageBox
-
-from cctv_yolo.data_manager import DataManager
-from cctv_yolo.main_window import MainWindow
+# NOTE: PySide6 / cctv_yolo imports are deliberately NOT done at module scope.
+# In the frozen Windows exe an import-time failure (missing DLL, missing hidden
+# import) raised here would crash the process *before* the try/except in
+# __main__ is reached — so no crash.log is written and the window just flashes
+# and closes. Importing inside the functions below keeps every import under the
+# crash handler.
 
 # ---------------------------------------------------------------------------
 # Color scheme
@@ -33,6 +33,8 @@ TEXT = "#eeeeee"
 
 def _make_dark_palette():
     """Build a dark QPalette based on the project color scheme."""
+    from PySide6.QtGui import QPalette, QColor
+
     palette = QPalette()
 
     bg = QColor(BG)
@@ -71,6 +73,12 @@ def _make_dark_palette():
 
 def main():
     """Application entry point."""
+    # Heavy imports happen here — inside the crash-guarded path (see __main__),
+    # so an import failure lands in crash.log instead of vanishing silently.
+    from PySide6.QtWidgets import QApplication
+    from cctv_yolo.data_manager import DataManager
+    from cctv_yolo.main_window import MainWindow
+
     app = QApplication(sys.argv)
     app.setApplicationName("CCTV-YOLO")
     app.setOrganizationName("CCTV-YOLO")
@@ -261,6 +269,8 @@ def _write_crash_log(exc_text: str) -> Path:
 def _show_crash_dialog(message: str) -> None:
     """Best-effort GUI popup so a double-clicked exe still tells the user."""
     try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
         instance = QApplication.instance()
         if instance is None:
             instance = QApplication(sys.argv)

@@ -68,6 +68,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Ship the diagnostic launcher next to the exe. If CCTV-YOLO.exe won't
+REM open, running CCTV-YOLO-debug.bat captures the real error to a log.
+copy /Y "CCTV-YOLO-debug.bat" "dist\CCTV-YOLO\" >nul
+
 REM ---------- 4. Done ----------
 echo [4/4] Done!
 call deactivate 2>nul
@@ -82,6 +86,10 @@ echo To run:
 echo   1. Copy dist\CCTV-YOLO\ folder to desired location
 echo   2. Run CCTV-YOLO.exe
 echo   3. Data will be created at %%USERPROFILE%%\Documents\CCTV-YOLO\
+echo.
+echo If CCTV-YOLO.exe will not open:
+echo   Run CCTV-YOLO-debug.bat instead. It captures the real error
+echo   to startup-output.log next to the exe.
 echo.
 echo To package as installer:
 echo   Run: iscc installer_windows.iss   (requires Inno Setup 6+)
