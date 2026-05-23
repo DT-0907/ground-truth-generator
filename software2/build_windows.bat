@@ -6,9 +6,22 @@ REM ============================================================
 REM
 REM Notes:
 REM  - First build takes 15-25 minutes (downloads ~2.5 GB of torch +
-REM    runs PyInstaller). Subsequent runs reuse build_venv\ and finish
-REM    in about 5 minutes.
-REM  - To force a clean rebuild: delete the build_venv\ folder first.
+REM    runs PyInstaller). Subsequent runs reuse the venv and finish in
+REM    about 5 minutes.
+REM
+REM  - The venv is created at a SHORT path under your user profile,
+REM    not inside the project folder. This is so deep pip-install paths
+REM    (PySide6, torch/cuda) don't exceed Windows' 260-char MAX_PATH
+REM    limit when the project itself is under a long path like
+REM    C:\Users\<name>\Downloads\ground-truth-generator-main\...
+REM
+REM    Default venv location: %USERPROFILE%\.cctv_yolo_build_venv
+REM    Override with the CCTV_YOLO_BUILD_VENV env var if you want to
+REM    put it somewhere else.
+REM
+REM  - To force a clean rebuild: delete the venv folder above (NOT the
+REM    project folder), then re-run this script.
+REM
 REM  - To build with CPU-only torch (smaller, no NVIDIA GPU support):
 REM       set CCTV_YOLO_CPU_TORCH=1
 REM    before running this script.
@@ -24,10 +37,20 @@ echo.
 
 cd /d "%~dp0"
 
+REM Resolve the venv location. Default to a short path under %USERPROFILE%
+REM so deeply-nested site-packages paths stay under Windows MAX_PATH.
+if defined CCTV_YOLO_BUILD_VENV (
+    set "VENV_DIR=%CCTV_YOLO_BUILD_VENV%"
+) else (
+    set "VENV_DIR=%USERPROFILE%\.cctv_yolo_build_venv"
+)
+echo Using venv at: %VENV_DIR%
+echo.
+
 REM ---------- 1. Virtual environment ----------
-if not exist "build_venv" (
+if not exist "%VENV_DIR%" (
     echo [1/4] Creating virtual environment...
-    python -m venv build_venv
+    python -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo.
         echo ERROR: failed to create virtual environment.
@@ -36,14 +59,14 @@ if not exist "build_venv" (
         goto :fail
     )
 ) else (
-    echo [1/4] Reusing existing build_venv\
+    echo [1/4] Reusing existing venv at %VENV_DIR%
 )
 
-call build_venv\Scripts\activate.bat
+call "%VENV_DIR%\Scripts\activate.bat"
 if errorlevel 1 (
     echo.
-    echo ERROR: could not activate build_venv. The venv may be corrupted.
-    echo Delete the build_venv\ folder and re-run this script.
+    echo ERROR: could not activate venv. The venv may be corrupted.
+    echo Delete the folder "%VENV_DIR%" and re-run this script.
     goto :fail
 )
 
@@ -78,7 +101,7 @@ if errorlevel 1 (
     echo.
     echo ERROR: torch install failed.
     echo Try one of:
-    echo   - Use Python 3.10, 3.11, or 3.12 (delete build_venv, re-run)
+    echo   - Use Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
     echo   - Check your internet connection
     echo   - Run "python -m pip install torch torchvision" manually
     goto :fail
@@ -89,7 +112,12 @@ python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
     echo ERROR: requirements install failed.
-    echo See the pip output above for the actual reason.
+    echo.
+    echo If the error mentions "Windows Long Path support" or "[Errno 2] No
+    echo such file or directory" with a very long path, your project folder
+    echo is too deep. Move it to a shorter path like C:\cctv-yolo\ and
+    echo re-run. The venv itself is already at a short path, so this should
+    echo be rare.
     goto :fail
 )
 
@@ -98,10 +126,9 @@ echo.
 echo [3/4] Running PyInstaller (5-15 minutes)...
 
 REM Send PyInstaller workpath / distpath to short %TEMP% subfolders.
-REM Deep project paths (especially under OneDrive) combined with
-REM PyInstaller's internal xcopy steps exceed cmd.exe's 8191-char
-REM line limit and abort the build with "input line too long".
-REM Short %TEMP%\cyb and %TEMP%\cyd keep the line lengths safe.
+REM Deep project paths combined with PyInstaller's internal xcopy steps
+REM exceed cmd.exe's 8191-char line limit and abort with "input line
+REM too long". Short %TEMP%\cyb and %TEMP%\cyd keep that under control.
 set "PYI_WORK=%TEMP%\cyb"
 set "PYI_DIST=%TEMP%\cyd"
 if exist "%PYI_WORK%" rmdir /S /Q "%PYI_WORK%"
@@ -139,9 +166,10 @@ echo ==========================================
 echo.
 echo   Executable: %CD%\dist\CCTV-YOLO\CCTV-YOLO.exe
 echo   Folder    : %CD%\dist\CCTV-YOLO\
+echo   Build venv: %VENV_DIR%
 echo.
 echo To run:
-echo   1. Open the dist\CCTV-YOLO\ folder
+echo   1. Open the dist\CCTV-YOLO\ folder (opening it now)
 echo   2. Double-click CCTV-YOLO.exe
 echo.
 echo Data folder:
@@ -168,11 +196,13 @@ echo   Build FAILED
 echo ==========================================
 echo.
 echo Scroll up to see the actual error message.
+echo.
 echo Common fixes:
 echo   - Use Python 3.10, 3.11, or 3.12 (check: python --version)
-echo   - Delete the build_venv\ folder and re-run for a fresh install
-echo   - Move the project out of OneDrive if it is syncing
-echo   - Disable AV on this folder and on %%TEMP%%
+echo   - Delete the venv folder "%VENV_DIR%" and re-run for a fresh install
+echo   - Move the project to a SHORT path like C:\cctv-yolo\ if the error
+echo     mentions long paths or "[Errno 2] No such file or directory"
+echo   - Disable AV on the project folder and on %%TEMP%%
 echo.
 echo Press any key to close this window.
 pause >nul
