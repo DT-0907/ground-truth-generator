@@ -186,7 +186,7 @@ def collect_health_for_dataset(dataset_root: Path) -> dict:
     yaml_path = root / "data.yaml"
     if yaml_path.exists():
         try:
-            with open(yaml_path, "r") as f:
+            with open(yaml_path, "r", encoding="utf-8") as f:
                 for line in f:
                     if line.strip().startswith("names:"):
                         raw = line.split("names:", 1)[1].strip()
@@ -212,7 +212,7 @@ def collect_health_for_dataset(dataset_root: Path) -> dict:
             for lbl in ldir.glob("*.txt"):
                 n_labels += 1
                 try:
-                    with open(lbl, "r") as f:
+                    with open(lbl, "r", encoding="utf-8") as f:
                         for line in f:
                             parts = line.split()
                             if len(parts) < 5:
@@ -267,7 +267,7 @@ def save_health(report: dict, out_dir: Path, ts: Optional[str] = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = ts or datetime.now().strftime("%Y%m%d_%H%M%S")
     out = out_dir / f"dataset_health_{ts}.json"
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=str)
     return out
 

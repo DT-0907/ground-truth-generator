@@ -244,7 +244,7 @@ class VisualIndex:
             "backend": self.backend.name,
             "entries": [e.__dict__ for e in self.entries],
         }
-        with open(self.path_meta, "w") as f:
+        with open(self.path_meta, "w", encoding="utf-8") as f:
             json.dump(meta, f)
         np.save(self.path_emb, self.embeddings)
 

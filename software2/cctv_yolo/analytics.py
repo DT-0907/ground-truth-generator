@@ -150,7 +150,7 @@ def write_od_matrix_csv(od: dict, output_path: Path) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rois = od["rois"]
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["origin\\destination"] + rois)
         for o in rois:
@@ -208,7 +208,7 @@ def time_series_csv(
 
     # Write CSV
     classes = sorted(classes)
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         header = ["bucket_start_sec", "bucket_label", "total"]
         if per_class:
@@ -308,7 +308,7 @@ def write_speeds_csv(speeds: list[dict], output_path: Path) -> Path:
     cols = ["track_id", "class", "subclass",
             "avg_speed_mph", "peak_speed_mph",
             "avg_speed_kph", "peak_speed_kph", "samples"]
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for row in speeds:
@@ -472,7 +472,7 @@ def aggregate_group_time_series(
         per_session_buckets[sid] = sess_buckets
 
     classes = sorted(all_classes)
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         header = ["session_id", "bucket_start_sec", "bucket_label", "total"]
         header += [f"class:{c}" for c in classes]
@@ -519,7 +519,7 @@ def write_group_speeds_csv(speeds: list[dict], output_path: Path) -> Path:
     cols = ["session_id", "track_id", "class", "subclass",
             "avg_speed_mph", "peak_speed_mph",
             "avg_speed_kph", "peak_speed_kph", "samples"]
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for row in speeds:

@@ -1509,7 +1509,7 @@ class PreprocessingTab(QWidget):
         config_file = Path(self.data_manager.config_dir) / "model_config.json"
         try:
             if config_file.exists():
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return max(1, int(data.get("last_frame_skip", 1)))
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
@@ -1521,14 +1521,14 @@ class PreprocessingTab(QWidget):
         data = {}
         try:
             if config_file.exists():
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
         except (json.JSONDecodeError, OSError):
             data = {}
         data["last_frame_skip"] = int(value)
         try:
             config_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_file, "w") as f:
+            with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except OSError:
             pass
@@ -1572,7 +1572,7 @@ class PreprocessingTab(QWidget):
         if not p.exists():
             return []
         try:
-            with open(p, "r") as f:
+            with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 return data
@@ -1588,7 +1588,7 @@ class PreprocessingTab(QWidget):
         try:
             p = self._recent_runs_path()
             p.parent.mkdir(parents=True, exist_ok=True)
-            with open(p, "w") as f:
+            with open(p, "w", encoding="utf-8") as f:
                 json.dump(runs, f, indent=2)
         except OSError:
             pass

@@ -133,7 +133,7 @@ class PresetPicker(QWidget):
             self._presets = {}
             return
         try:
-            with open(self._presets_path, "r") as f:
+            with open(self._presets_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 self._presets = {
@@ -148,7 +148,7 @@ class PresetPicker(QWidget):
     def _save_to_disk(self) -> None:
         try:
             self._presets_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._presets_path, "w") as f:
+            with open(self._presets_path, "w", encoding="utf-8") as f:
                 json.dump(self._presets, f, indent=2)
         except Exception as e:
             logger.error("Failed to write presets %s: %s", self._presets_path, e)

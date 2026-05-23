@@ -275,7 +275,7 @@ def _load_ui_state(data_manager) -> dict:
     if not p.exists():
         return {}
     try:
-        with open(p, "r") as f:
+        with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -285,7 +285,7 @@ def _save_ui_state(data_manager, state: dict) -> None:
     p = _ui_state_path(data_manager)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(p, "w") as f:
+        with open(p, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
     except OSError as e:
         logger.warning("Couldn't persist ui_state.json: %s", e)
@@ -1519,7 +1519,7 @@ class PerformanceTab(QWidget):
         if not path:
             return
         try:
-            with open(path, "w", newline="") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(["CCTV-YOLO Performance Report"])
                 w.writerow(["Session", sid])
@@ -1565,7 +1565,7 @@ class PerformanceTab(QWidget):
         if not path:
             return
         try:
-            with open(path, "w", newline="") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(["CCTV-YOLO Performance Report (Group)"])
                 w.writerow(["Group", gname])
@@ -1787,7 +1787,7 @@ class PerformanceTab(QWidget):
         if not path:
             return
         try:
-            with open(path, "w", newline="") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(["CCTV-YOLO Model Comparison"])
                 w.writerow(["Model A", self._last_compare_result.get("model_a", "")])

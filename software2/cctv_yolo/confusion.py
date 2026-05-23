@@ -279,7 +279,7 @@ def save_confusion(result: dict, out_dir: Path, ts: Optional[str] = None) -> tup
     png_path = out_dir / f"confusion_{ts}.png"
     payload = dict(result)
     payload.setdefault("saved_at", datetime.now().isoformat())
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, default=str)
     render_confusion_png(result, png_path)
     return json_path, png_path

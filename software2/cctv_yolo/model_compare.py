@@ -198,7 +198,7 @@ def save_comparison_result(
     enriched = dict(payload)
     enriched.setdefault("saved_at", dt.datetime.now().isoformat(timespec="seconds"))
     enriched.setdefault("session_id", session_id)
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=2, default=str)
     return out
 

@@ -151,7 +151,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     # Load feedback for confidence adjustment if available
     confidence_adjustments = {}
     if feedback_file and Path(feedback_file).exists():
-        with open(feedback_file, 'r') as f:
+        with open(feedback_file, 'r', encoding="utf-8") as f:
             feedback = json.load(f)
             confidence_adjustments = feedback.get('confidence_adjustments', {})
         print(f"Loaded confidence adjustments from feedback")
@@ -390,7 +390,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
 
     output_name = session_id if session_id else video_path.stem
     output_file = output_dir / f"{output_name}.json"
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding="utf-8") as f:
         json.dump(output_data, f, indent=2)
 
     print(f"\nResults saved to: {output_file}")

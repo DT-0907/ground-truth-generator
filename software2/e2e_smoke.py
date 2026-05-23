@@ -245,6 +245,28 @@ def main() -> int:
         proc_ok, proc_err = False, str(e)
     check("cctv_yolo.processor imports cleanly", proc_ok, proc_err)
 
+    # 14. Every text-mode open() in cctv_yolo/ specifies encoding=
+    # (regression: on Windows, default cp1252 bombs on UTF-8 JSON)
+    import re
+    bad_open: list[str] = []
+    open_pat = re.compile(
+        r'open\([^)]*?,\s*["\']([rwa]\+?)["\'](?!\s*,\s*encoding)',
+    )
+    for py in Path("cctv_yolo").rglob("*.py"):
+        if "__pycache__" in str(py):
+            continue
+        text = py.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if "encoding=" in line:
+                continue
+            if open_pat.search(line):
+                bad_open.append(f"{py}:{i}")
+    check("Every text-mode open() specifies encoding=",
+          not bad_open,
+          (f"{len(bad_open)} sites missing encoding=: "
+           + ", ".join(bad_open[:3]) + ("..." if len(bad_open) > 3 else ""))
+          if bad_open else "all good")
+
     # Cleanup
     dm.delete_group(gid)
 

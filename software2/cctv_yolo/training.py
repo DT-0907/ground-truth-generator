@@ -248,7 +248,7 @@ def build_yolo_dataset(
             cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 88])
             images_written += 1
 
-            with open(lbl_path, "w") as f:
+            with open(lbl_path, "w", encoding="utf-8") as f:
                 for cls_idx, bbox in per_frame[fnum]:
                     x1, y1, x2, y2 = bbox
                     cx = ((x1 + x2) / 2) / w
@@ -272,7 +272,7 @@ def build_yolo_dataset(
     classes_sorted = sorted(class_index.items(), key=lambda x: x[1])
     class_names = [c for c, _ in classes_sorted]
     yaml_path = output_root / "data.yaml"
-    with open(yaml_path, "w") as f:
+    with open(yaml_path, "w", encoding="utf-8") as f:
         f.write(f"path: {output_root.resolve()}\n")
         f.write("train: images/train\n")
         f.write("val: images/val\n")
@@ -460,7 +460,7 @@ class TrainingWorker(QThread):
             try:
                 meta = self._collect_meta(src, dest, stamp)
                 meta_path = dest.with_suffix(".meta.json")
-                with open(meta_path, "w") as f:
+                with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta, f, indent=2)
                 self.log_line.emit(f"Wrote sidecar metadata: {meta_path.name}")
             except Exception as e:
@@ -637,7 +637,7 @@ def combine_datasets(
 
     # 3) Write data.yaml (union classes).
     yaml_path = output_path / "data.yaml"
-    with open(yaml_path, "w") as f:
+    with open(yaml_path, "w", encoding="utf-8") as f:
         f.write(f"path: {output_path.resolve()}\n")
         f.write("train: images/train\n")
         f.write("val: images/val\n")

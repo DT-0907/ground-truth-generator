@@ -599,7 +599,7 @@ class LiveTab(QWidget):
     def _load_ui_state(self) -> dict:
         try:
             if self._ui_state_path.exists():
-                with open(self._ui_state_path, "r") as f:
+                with open(self._ui_state_path, "r", encoding="utf-8") as f:
                     return json.load(f) or {}
         except Exception:
             pass
@@ -610,7 +610,7 @@ class LiveTab(QWidget):
         state.update(patch)
         try:
             self._ui_state_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._ui_state_path, "w") as f:
+            with open(self._ui_state_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
         except Exception:
             pass
@@ -639,7 +639,7 @@ class LiveTab(QWidget):
         if not self._rois_store_path.exists():
             return {}
         try:
-            with open(self._rois_store_path, "r") as f:
+            with open(self._rois_store_path, "r", encoding="utf-8") as f:
                 return json.load(f) or {}
         except Exception:
             return {}
@@ -647,7 +647,7 @@ class LiveTab(QWidget):
     def _save_all_rois(self, all_rois: dict):
         try:
             self._rois_store_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._rois_store_path, "w") as f:
+            with open(self._rois_store_path, "w", encoding="utf-8") as f:
                 json.dump(all_rois, f, indent=2)
         except Exception:
             pass

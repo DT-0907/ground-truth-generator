@@ -1021,7 +1021,7 @@ class AnalyticsTab(QWidget):
         self.ts_status.setText(f"saved: {path.name}")
         # Load + preview first 50 rows
         try:
-            with open(path, "r", newline="") as f:
+            with open(path, "r", newline="", encoding="utf-8") as f:
                 reader = _csv.reader(f)
                 rows = list(reader)
         except Exception:

@@ -160,7 +160,7 @@ class DatasetEvalWorker(QThread):
             class_names: list[str] = []
             yaml_path = self.dataset_root / "data.yaml"
             if yaml_path.exists():
-                with open(yaml_path, "r") as f:
+                with open(yaml_path, "r", encoding="utf-8") as f:
                     for line in f:
                         if line.strip().startswith("names:"):
                             raw = line.split("names:", 1)[1].strip().strip("[]")
@@ -188,7 +188,7 @@ class DatasetEvalWorker(QThread):
                     continue
                 h, w = img.shape[:2]
                 boxes: list[dict] = []
-                with open(lbl_p, "r") as lf:
+                with open(lbl_p, "r", encoding="utf-8") as lf:
                     for line in lf:
                         parts = line.split()
                         if len(parts) < 5:
@@ -1124,7 +1124,7 @@ class _DatasetSubTab(_SubTabBase):
         class_names: list[str] = []
         yaml_path = self._current_root / "data.yaml"
         if yaml_path.exists():
-            with open(yaml_path, "r") as f:
+            with open(yaml_path, "r", encoding="utf-8") as f:
                 for line in f:
                     if line.strip().startswith("names:"):
                         raw = line.split("names:", 1)[1].strip().strip("[]")
@@ -1148,7 +1148,7 @@ class _DatasetSubTab(_SubTabBase):
                 continue
             h, w = img.shape[:2]
             gt: list[dict] = []
-            with open(lbl_p, "r") as lf:
+            with open(lbl_p, "r", encoding="utf-8") as lf:
                 for line in lf:
                     parts = line.split()
                     if len(parts) < 5:

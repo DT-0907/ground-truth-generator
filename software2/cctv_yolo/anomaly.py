@@ -271,7 +271,7 @@ def save_anomalies(anomalies: list[Anomaly], out_dir: Path,
         "count": len(anomalies),
         "anomalies": [asdict(a) for a in anomalies],
     }
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     return out
 

@@ -68,7 +68,7 @@ def _atomic_write_json(path: Path, data: dict, *, indent: int = 2, backup: bool 
         prefix=f".{path.stem}-", suffix=f"{path.suffix}.tmp", dir=str(path.parent)
     )
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=indent)
             f.flush()
             os.fsync(f.fileno())
@@ -164,7 +164,7 @@ class DataManager(QObject):
         config_file = self.config_dir / "model_config.json"
         if config_file.exists():
             try:
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return data.get("last_model")
             except (json.JSONDecodeError, OSError):
@@ -177,7 +177,7 @@ class DataManager(QObject):
         data = {}
         if config_file.exists():
             try:
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -189,7 +189,7 @@ class DataManager(QObject):
         config_file = self.config_dir / "model_config.json"
         if config_file.exists():
             try:
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return float(data.get("last_confidence", 0.25))
             except (json.JSONDecodeError, OSError, ValueError):
@@ -202,7 +202,7 @@ class DataManager(QObject):
         data = {}
         if config_file.exists():
             try:
-                with open(config_file, "r") as f:
+                with open(config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -295,7 +295,7 @@ class DataManager(QObject):
         for track_file in sorted(track_files):
             session_id = track_file.stem
             try:
-                with open(track_file, "r") as f:
+                with open(track_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
@@ -376,7 +376,7 @@ class DataManager(QObject):
             if track_file.exists() and status != "processing":
                 status = "processed"
                 try:
-                    with open(track_file, "r") as tf:
+                    with open(track_file, "r", encoding="utf-8") as tf:
                         track_data = json.load(tf)
                     track_count = len(track_data.get("tracks", []))
                 except Exception:
@@ -428,7 +428,7 @@ class DataManager(QObject):
         track_file = self.tracks_dir / f"{session_id}.json"
         if not track_file.exists():
             return None
-        with open(track_file, "r") as f:
+        with open(track_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         if "rois" not in data:
             data["rois"] = []
@@ -439,7 +439,7 @@ class DataManager(QObject):
         correction_file = self.corrections_dir / f"{session_id}.json"
         if not correction_file.exists():
             return None
-        with open(correction_file, "r") as f:
+        with open(correction_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         if "rois" not in data:
             data["rois"] = []
@@ -454,10 +454,10 @@ class DataManager(QObject):
         correction_file = self.corrections_dir / f"{session_id}.json"
         track_file = self.tracks_dir / f"{session_id}.json"
         if correction_file.exists():
-            with open(correction_file, "r") as f:
+            with open(correction_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         elif track_file.exists():
-            with open(track_file, "r") as f:
+            with open(track_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             return None
@@ -532,7 +532,7 @@ class DataManager(QObject):
             if session_id == current_session_id:
                 continue
             try:
-                with open(track_file, "r") as f:
+                with open(track_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if data.get("stats", {}).get("needs_review", 0) > 0:
                     # Only suggest if there are no corrections yet
@@ -658,10 +658,10 @@ class DataManager(QObject):
         correction_file = self.corrections_dir / f"{session_id}.json"
         track_file = self.tracks_dir / f"{session_id}.json"
         if correction_file.exists():
-            with open(correction_file, "r") as f:
+            with open(correction_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         elif track_file.exists():
-            with open(track_file, "r") as f:
+            with open(track_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             raise FileNotFoundError(f"No tracks found for {session_id}")
@@ -944,7 +944,7 @@ class DataManager(QObject):
         if not roi_file.exists():
             return None
         try:
-            with open(roi_file, "r") as f:
+            with open(roi_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data.get(session_id)
         except (json.JSONDecodeError, OSError):
@@ -956,7 +956,7 @@ class DataManager(QObject):
         data = {}
         if roi_file.exists():
             try:
-                with open(roi_file, "r") as f:
+                with open(roi_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -976,7 +976,7 @@ class DataManager(QObject):
         if not roi_file.exists():
             return None
         try:
-            with open(roi_file, "r") as f:
+            with open(roi_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if data else None
         except (json.JSONDecodeError, OSError):
@@ -1006,7 +1006,7 @@ class DataManager(QObject):
         if not f.exists():
             return {"_version": 1, "groups": []}
         try:
-            with open(f, "r") as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if "groups" not in data:
                 data["groups"] = []
@@ -1157,7 +1157,7 @@ class DataManager(QObject):
         if not f.exists():
             return {"_version": 1, "history": []}
         try:
-            with open(f, "r") as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 return json.load(fh)
         except (json.JSONDecodeError, OSError):
             return {"_version": 1, "history": []}
@@ -1296,7 +1296,7 @@ class DataManager(QObject):
         if not f.exists():
             return {}
         try:
-            with open(f, "r") as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
@@ -1336,7 +1336,7 @@ class DataManager(QObject):
         if not f.exists():
             return {"folders": {}, "active_folder": None}
         try:
-            with open(f, "r") as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if not isinstance(data, dict):
                 return {"folders": {}, "active_folder": None}

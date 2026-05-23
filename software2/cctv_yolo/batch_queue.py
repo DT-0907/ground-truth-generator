@@ -48,7 +48,7 @@ class BatchQueueStore:
         if not self.path.exists():
             return []
         try:
-            with open(self.path, "r") as f:
+            with open(self.path, "r", encoding="utf-8") as f:
                 items = json.load(f)
             if not isinstance(items, list):
                 return []

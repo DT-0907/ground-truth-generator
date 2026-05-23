@@ -49,9 +49,9 @@ def analyze_corrections(tracks_dir: str, corrections_dir: str, output_file: str 
 
         stats['total_sessions'] += 1
 
-        with open(orig_file, 'r') as f:
+        with open(orig_file, 'r', encoding="utf-8") as f:
             original = json.load(f)
-        with open(corr_file, 'r') as f:
+        with open(corr_file, 'r', encoding="utf-8") as f:
             corrected = json.load(f)
 
         orig_tracks = {t['track_id']: t for t in original.get('tracks', [])}
@@ -101,7 +101,7 @@ def analyze_corrections(tracks_dir: str, corrections_dir: str, output_file: str 
         'confidence_adjustments': confidence_adjustments
     }
 
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding="utf-8") as f:
         json.dump(output, f, indent=2)
 
     print(f"Feedback saved to: {output_file}")
@@ -151,7 +151,7 @@ def export_coco(tracks_dir: str, corrections_dir: str, video_dir: str,
         return None
 
     for corr_file in correction_files:
-        with open(corr_file, 'r') as f:
+        with open(corr_file, 'r', encoding="utf-8") as f:
             data = json.load(f)
 
         video_name = data.get('video_name', corr_file.stem + '.mp4')
@@ -230,7 +230,7 @@ def export_coco(tracks_dir: str, corrections_dir: str, video_dir: str,
         cap.release()
 
     coco_file = output_dir / "annotations.json"
-    with open(coco_file, 'w') as f:
+    with open(coco_file, 'w', encoding="utf-8") as f:
         json.dump(coco_data, f, indent=2)
 
     print(f"\nCOCO dataset exported to: {output_dir}")
