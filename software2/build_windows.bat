@@ -37,12 +37,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Default `pip install torch` on Windows pulls the CUDA wheels (~2.5 GB).
-REM CPU-only wheels are ~200 MB, install in seconds, and run fine on any
-REM Windows machine. Install these FIRST so the resolver doesn't pick CUDA
-REM when ultralytics later asks for torch.
-echo Installing CPU-only torch (smaller + faster than CUDA wheels)...
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+REM Install CUDA-enabled torch so the bundled exe automatically uses an
+REM NVIDIA GPU when one is present (dramatically faster than CPU for YOLO).
+REM On machines WITHOUT a CUDA GPU the same torch falls back to CPU at
+REM runtime via `torch.cuda.is_available()`, so this is strictly better
+REM than the old CPU-only build -- it just costs ~2 GB more on disk.
+REM
+REM To opt out and ship a smaller (~200 MB) CPU-only build, set the env
+REM var CCTV_YOLO_CPU_TORCH=1 before running this script.
+if defined CCTV_YOLO_CPU_TORCH (
+    echo Installing CPU-only torch (CCTV_YOLO_CPU_TORCH=1 set)...
+    python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+) else (
+    echo Installing CUDA torch (auto-uses NVIDIA GPU when available, falls back to CPU)...
+    python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+)
 if errorlevel 1 (
     echo ERROR: torch install failed.
     pause

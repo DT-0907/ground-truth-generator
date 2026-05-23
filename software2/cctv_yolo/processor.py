@@ -12,16 +12,33 @@ from ultralytics import YOLO
 
 
 def _get_device():
-    """Detect the best available device: CUDA GPU, Apple MPS, or CPU."""
+    """Detect the best available device: CUDA GPU, Apple MPS, or CPU.
+
+    Cross-platform behavior:
+      - Windows w/ NVIDIA: CUDA (fastest)        — requires CUDA-enabled torch
+                                                    (see build_windows.bat)
+      - Apple Silicon Mac: MPS (Metal)           — built into PyTorch
+      - Intel Mac:         CPU
+      - Linux w/ NVIDIA:   CUDA
+      - Anywhere else:     CPU
+    """
+    import logging
+    _log = logging.getLogger(__name__)
     if torch.cuda.is_available():
         count = torch.cuda.device_count()
         name = torch.cuda.get_device_name(0)
-        print(f"GPU detected: {name} ({count} device(s))")
+        msg = f"CUDA GPU detected: {name} ({count} device(s))"
+        print(msg)
+        _log.info(msg)
         return "cuda:0"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        print("Apple MPS (Metal) detected")
+        msg = "Apple MPS (Metal) detected"
+        print(msg)
+        _log.info(msg)
         return "mps"
-    print("No GPU detected, using CPU")
+    msg = "No GPU detected, using CPU"
+    print(msg)
+    _log.info(msg)
     return "cpu"
 
 
