@@ -283,15 +283,31 @@ class ModelsTab(QWidget):
             def run(self):
                 try:
                     from ultralytics import YOLO
-                    import shutil
-                    # YOLO() auto-downloads the .pt the first time it's used
+                    import shutil, os
+                    # YOLO() auto-downloads the .pt the first time it's used.
+                    # Cache location differs by platform:
+                    #   macOS  : ~/.config/Ultralytics/ or cwd
+                    #   Windows: %APPDATA%/Ultralytics/ or cwd
+                    #   Linux  : ~/.config/Ultralytics/ or cwd
+                    # We check both `m.ckpt_path` (the canonical answer) and a
+                    # set of fallback locations so cross-platform downloads
+                    # always land in our models_dir.
                     m = YOLO(self.model_name)
-                    src = Path(m.ckpt_path) if hasattr(m, "ckpt_path") and m.ckpt_path else None
-                    if src is None or not src.exists():
-                        # Fallback: ultralytics caches downloads in cwd
-                        src = Path(self.model_name)
-                    if not src.exists():
-                        self.failed.emit(f"Downloaded but couldn't locate {self.model_name}")
+                    candidates = []
+                    if hasattr(m, "ckpt_path") and m.ckpt_path:
+                        candidates.append(Path(m.ckpt_path))
+                    candidates.append(Path.cwd() / self.model_name)
+                    candidates.append(Path.home() / ".config" / "Ultralytics" / self.model_name)
+                    if os.name == "nt":  # Windows
+                        appdata = os.environ.get("APPDATA")
+                        if appdata:
+                            candidates.append(Path(appdata) / "Ultralytics" / self.model_name)
+                    src = next((c for c in candidates if c.exists()), None)
+                    if src is None:
+                        self.failed.emit(
+                            f"Downloaded {self.model_name} but couldn't locate the file. "
+                            f"Tried: {', '.join(str(c) for c in candidates)}"
+                        )
                         return
                     dest = self.dest_dir / self.model_name
                     if src.resolve() != dest.resolve():

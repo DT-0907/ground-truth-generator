@@ -57,6 +57,10 @@ if errorlevel 1 (
 )
 
 REM ---------- 3. PyInstaller ----------
+REM The spec uses collect_submodules('cctv_yolo') so any new module added
+REM under cctv_yolo/ (theme.py, __version__.py, logging_config.py, widgets/,
+REM etc.) is bundled automatically -- no spec edits required when adding
+REM more pure-Python modules.
 echo [3/4] Running PyInstaller (this can take 5-15 minutes)...
 
 REM PyInstaller's COLLECT phase shells out internal xcopy/file-list commands
