@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(action_show_log)
 
     def _show_log_folder(self):
-        """PRD C4 — Help → Show Log Folder opens ~/Documents/CCTV-YOLO/logs/."""
+        """PRD C4 — Help → Show Log Folder opens <data_root>/logs/."""
         import subprocess
         from cctv_yolo.logging_config import get_log_file_path
         log_path = get_log_file_path()

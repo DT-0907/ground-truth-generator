@@ -15,13 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from cctv_yolo.__version__ import __version__, __app_name__
+from cctv_yolo.paths import get_log_file
 from cctv_yolo.theme import (
     INDIGO, PANEL, BORDER, PURPLE, PINK, OFFWHITE, TEXT_MUTED, RADIUS,
 )
 from cctv_yolo.widgets.open_location_bar import open_path
-
-
-_LOG_FILE = Path.home() / "Documents" / "CCTV-YOLO" / "logs" / "app.log"
 
 
 class AboutDialog(QDialog):
@@ -63,7 +61,7 @@ class AboutDialog(QDialog):
             ("Python", platform.python_version()),
             ("Architecture", platform.machine()),
             ("Data folder", str(self.dm.data_root)),
-            ("Log file", str(_LOG_FILE)),
+            ("Log file", str(get_log_file())),
         ]
         for i, (k, val) in enumerate(rows):
             kl = QLabel(k)
@@ -100,8 +98,8 @@ class AboutDialog(QDialog):
         open_log_btn = QPushButton("📁  Open Log Folder")
         open_log_btn.setStyleSheet(btn_style)
         open_log_btn.clicked.connect(
-            lambda: open_path(_LOG_FILE, select=True)
-            if _LOG_FILE.exists() else open_path(_LOG_FILE.parent)
+            lambda: open_path(get_log_file(), select=True)
+            if get_log_file().exists() else open_path(get_log_file().parent)
         )
         h.addWidget(open_log_btn)
 

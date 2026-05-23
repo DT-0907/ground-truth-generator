@@ -189,10 +189,8 @@ class BatchTab(QWidget):
         ol = OpenLocationBar(self)
         ol.add_folder("Active Folder", lambda: self._active_folder)
         ol.add_folder("Tracks Output", self.dm.tracks_dir)
-        ol.add_file(
-            "Errors Log",
-            Path.home() / "Documents" / "CCTV-YOLO" / "logs" / "app.log",
-        )
+        from cctv_yolo.paths import get_log_file
+        ol.add_file("Errors Log", get_log_file)
         title_row.addWidget(ol)
         root.addLayout(title_row)
 

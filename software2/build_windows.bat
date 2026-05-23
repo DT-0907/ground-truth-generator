@@ -251,7 +251,13 @@ if "%BUILD_STATUS%"=="success" (
     echo.
     echo To run on this machine: double-click CCTV-YOLO.exe inside that folder.
     echo To share: copy the entire dist\CCTV-YOLO\ folder to another machine.
-    echo Data will be created at %%USERPROFILE%%\Documents\CCTV-YOLO\
+    echo.
+    echo Data location:
+    echo   All videos / tracks / corrections / models / logs are stored IN
+    echo   THE SAME FOLDER as the .exe -- so the install is portable. Just
+    echo   copy the dist\CCTV-YOLO\ folder anywhere to move everything together.
+    echo   Override with the CCTV_YOLO_DATA_DIR env var if you want a different
+    echo   location.
     echo.
     echo If CCTV-YOLO.exe will not open, run CCTV-YOLO-debug.bat instead --
     echo it captures the real startup error to startup-output.log.

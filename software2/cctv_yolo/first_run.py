@@ -1,7 +1,8 @@
 """First-run wizard (PRD C7).
 
-Triggered on first launch (no `~/Documents/CCTV-YOLO/.first_run_complete` marker).
-Walks the user through: welcome → data folder → model download → tour → finish.
+Triggered on first launch when the `.first_run_complete` marker file is
+absent from the data root. Walks the user through: welcome → data folder
+→ model download → tour → finish.
 """
 from __future__ import annotations
 
@@ -14,21 +15,20 @@ from PySide6.QtWidgets import (
 )
 
 from cctv_yolo.__version__ import __version__, __app_name__
+from cctv_yolo.paths import get_first_run_marker
 from cctv_yolo.theme import (
     PURPLE, PINK, OFFWHITE, PANEL, INDIGO, BORDER, TEXT_MUTED, RADIUS,
 )
 
 
-FIRST_RUN_MARKER = Path.home() / "Documents" / "CCTV-YOLO" / ".first_run_complete"
-
-
 def is_first_run() -> bool:
-    return not FIRST_RUN_MARKER.exists()
+    return not get_first_run_marker().exists()
 
 
 def mark_first_run_complete() -> None:
-    FIRST_RUN_MARKER.parent.mkdir(parents=True, exist_ok=True)
-    FIRST_RUN_MARKER.touch()
+    marker = get_first_run_marker()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
 
 
 _TITLE_STYLE = f"color: {PINK}; font-size: 20px; font-weight: bold;"

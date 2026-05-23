@@ -447,7 +447,8 @@ class TrainingWorker(QThread):
 
             # Copy into models dir with a versioned name
             if self.models_dir is None:
-                self.models_dir = Path.home() / "Documents" / "CCTV-YOLO" / "models"
+                from cctv_yolo.paths import get_models_dir
+                self.models_dir = get_models_dir()
             self.models_dir.mkdir(parents=True, exist_ok=True)
             stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
             dest = self.models_dir / f"trained_{stamp}.pt"

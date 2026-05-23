@@ -118,7 +118,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         session_id: Optional session_id for output filename (defaults to video stem)
         progress_callback: Optional callable(percent: int) for progress updates
         models_dir: Optional path to local models directory. If not given,
-                    defaults to ~/Documents/CCTV-YOLO/models/
+                    defaults to <data_root>/models/ (resolved via
+                    cctv_yolo.paths.get_data_root() — same folder as the
+                    app / repo so the install is portable).
         processing_roi: Optional ROI dict to filter detections. Only detections
                        whose bbox center falls inside the ROI are kept.
                        Format: {"type": "rect"|"polygon", "points": [...]}
@@ -158,7 +160,8 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     if models_dir:
         _models_dir = Path(models_dir)
     else:
-        _models_dir = Path.home() / "Documents" / "CCTV-YOLO" / "models"
+        from cctv_yolo.paths import get_models_dir
+        _models_dir = get_models_dir()
     _models_dir.mkdir(parents=True, exist_ok=True)
 
     local_model = _models_dir / model_name

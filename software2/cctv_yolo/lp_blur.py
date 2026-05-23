@@ -2,8 +2,9 @@
 License-plate blur — runs an optional plate detector on vehicle crops
 and blurs the matched regions in-place.
 
-Drop a plate-detection .pt into ~/Documents/CCTV-YOLO/models/ named
-``license_plate.pt`` (or set CCTV_YOLO_LP_MODEL env var) to enable.
+Drop a plate-detection .pt into the app's models/ folder (resolved via
+``cctv_yolo.paths.get_models_dir()``) named ``license_plate.pt`` (or set
+the CCTV_YOLO_LP_MODEL env var to point at any path) to enable.
 The blurrer is a graceful no-op if the model can't be loaded.
 """
 from __future__ import annotations
@@ -35,7 +36,8 @@ class LicensePlateBlurrer:
             candidates.append(Path(model_path))
         if os.environ.get(LP_MODEL_ENV):
             candidates.append(Path(os.environ[LP_MODEL_ENV]))
-        candidates.append(Path.home() / "Documents" / "CCTV-YOLO" / "models" / DEFAULT_LP_MODEL)
+        from cctv_yolo.paths import get_models_dir
+        candidates.append(get_models_dir() / DEFAULT_LP_MODEL)
 
         for p in candidates:
             if p.exists():

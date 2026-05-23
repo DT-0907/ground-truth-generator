@@ -1,7 +1,9 @@
 """Central logging configuration (PRD C4).
 
 Configures the root logger ONCE at app startup with:
-- A rotating file handler at ~/Documents/CCTV-YOLO/logs/app.log (5 MB × 5)
+- A rotating file handler at <data_root>/logs/app.log (5 MB × 5)
+  where <data_root> comes from cctv_yolo.paths.get_data_root() — i.e.
+  the same folder as the app/repo, so logs travel with the install.
 - A stream handler that prints to stdout (visible in Windows console=True
   build + during dev runs)
 
@@ -34,9 +36,11 @@ def configure_logging(data_root: Path | None = None, *, level: int = logging.INF
     """
     global _configured
 
-    # Resolve the log directory. Default = ~/Documents/CCTV-YOLO/logs/
+    # Resolve the log directory via the centralized resolver so all callers
+    # land on the same place (PRD C4 + portable-data refactor).
     if data_root is None:
-        data_root = Path.home() / "Documents" / "CCTV-YOLO"
+        from cctv_yolo.paths import get_data_root
+        data_root = get_data_root()
     log_dir = Path(data_root) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"
@@ -81,5 +85,6 @@ def configure_logging(data_root: Path | None = None, *, level: int = logging.INF
 def get_log_file_path(data_root: Path | None = None) -> Path:
     """Return the path to app.log without configuring logging (for menu links)."""
     if data_root is None:
-        data_root = Path.home() / "Documents" / "CCTV-YOLO"
+        from cctv_yolo.paths import get_data_root
+        data_root = get_data_root()
     return Path(data_root) / "logs" / "app.log"

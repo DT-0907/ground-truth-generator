@@ -623,7 +623,7 @@ class ModelsTab(QWidget):
         choice, ok = QInputDialog.getItem(
             self, "Download YOLOv8 model",
             "Which model would you like to download?\n"
-            "(Downloaded once, cached in ~/Documents/CCTV-YOLO/models/)",
+            "(Downloaded once, cached in the app's models/ folder)",
             labels, 0, False,
         )
         if not ok:

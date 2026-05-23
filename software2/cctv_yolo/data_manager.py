@@ -100,14 +100,13 @@ class DataManager(QObject):
 
     def __init__(self):
         super().__init__()
-        # On macOS the case-insensitive filesystem deliberately makes
-        # ~/Documents/CCTV-YOLO/ resolve to the project repo at
-        # ~/Documents/cctv-yolo/ — that's the intended dev-mode layout
-        # (data/ + config/ + models/ live inside the repo). On Windows
-        # the same path is just a fresh user folder. open_folder("data")
-        # below opens the inner data/ subfolder so the user lands on
-        # videos/tracks/corrections/exports directly.
-        self._data_root = Path.home() / "Documents" / "CCTV-YOLO"
+        # Data root resolution lives in cctv_yolo.paths so every consumer
+        # (logger, first_run, models_tab, training, ...) sees the same
+        # location. In dev mode this is the repo root; in a frozen build
+        # it's the folder containing the .exe / .app — so the install is
+        # portable.
+        from cctv_yolo.paths import get_data_root
+        self._data_root = get_data_root()
         self._init_dirs()
 
         # Active directories (switch between local and NAS)

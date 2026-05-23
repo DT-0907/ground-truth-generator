@@ -46,15 +46,37 @@ Cross-cutting:
 - **Help → About** shows version, platform, data + log folder shortcuts.
 - **Help → Show Log Folder** opens `~/Documents/CCTV-YOLO/logs/` (rotating 5 MB × 5 file handler).
 
-Storage layout (`~/Documents/CCTV-YOLO/`):
+Storage layout — **portable**: all runtime files live in the **same folder
+as the app**, not a separate location. Move/copy the folder, your work
+comes with it.
 
 ```
-data/{videos,tracks,corrections,exports,training,live}/
-config/         model_config.json, nas.json, ui_state.json, session_groups.json,
-                training_history.json, batch_registry.json, batch_session_map.json
-models/         *.pt + sidecar .meta.json for trained models
-logs/           app.log (rotating)
+<install-folder>/                  ← the repo root in dev mode, or
+                                     the folder containing CCTV-YOLO.exe
+                                     / CCTV-YOLO.app in a frozen build
+├── data/
+│   ├── videos/                    raw input videos
+│   ├── tracks/                    YOLO detection + ByteTrack output JSON
+│   ├── corrections/               your edits (saved separately, never
+│   │                              overwrites tracks/)
+│   ├── exports/                   COCO / YOLO / CVAT / MOT / CSV / MP4 / PDF / zip
+│   └── training/                  dataset builds (ds_*) + run logs
+├── config/                        model_config.json, nas.json, ui_state.json,
+│                                  session_groups.json, training_history.json,
+│                                  batch_registry.json, batch_session_map.json
+├── models/                        *.pt + sidecar .meta.json for trained models
+├── logs/                          app.log (rotating, 5 MB × 5)
+├── .first_run_complete            marker (presence = wizard already shown)
+└── crash.log                      written if startup crashes
 ```
+
+Resolution rules (`cctv_yolo/paths.py`):
+
+1. `$CCTV_YOLO_DATA_DIR` env var → explicit override
+2. Frozen build → the folder containing the exe / .app
+3. Source mode → the repo root (parent of `software2/`)
+4. Fallback if the above is read-only (e.g. installed under
+   `C:\Program Files\`) → `~/Documents/cctv-yolo/`
 
 ## Quick start (dev)
 

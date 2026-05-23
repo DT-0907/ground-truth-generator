@@ -377,7 +377,13 @@ def _write_crash_log(exc_text: str) -> Path:
     The exe runs with console=True on Windows, but if the user double-clicks
     they may miss the console flash — the log is the durable record.
     """
-    log = Path.home() / "Documents" / "CCTV-YOLO" / "crash.log"
+    try:
+        from cctv_yolo.paths import get_crash_log
+        log = get_crash_log()
+    except Exception:
+        # Worst case (paths.py failed to import for some reason) — fall
+        # back to a stable known location so we still record the crash.
+        log = Path.home() / "Documents" / "cctv-yolo" / "crash.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(exc_text)
     return log

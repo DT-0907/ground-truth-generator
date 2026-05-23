@@ -53,15 +53,18 @@ test/models/
 claude-work/venv/
 claude-work/data/
 
-# Runtime data the app creates inside the repo (because macOS case-insensitive
-# FS merges ~/Documents/CCTV-YOLO with ~/Documents/cctv-yolo).
+# Runtime data the app creates inside the repo / install dir
+# (data root is resolved by cctv_yolo/paths.py — by default the repo root in
+# dev mode, or the .exe / .app folder in a frozen build).
 logs/
 .planning/
 .bak/
 *.bak-*
 config/
 models/
+data/
 data/.DS_Store
+crash.log
 
 # PyInstaller intermediate warnings (regenerated every build)
 software2/build/warn-*.txt
