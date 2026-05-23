@@ -129,8 +129,13 @@ class TrackItem(QFrame):
         header.addWidget(id_label)
         header.addStretch()
 
-        class_name = track.get("class", "unknown")
-        class_color = CLASS_COLORS.get(class_name, CLASS_COLORS["unknown"])
+        class_name = track.get("class") or "unknown"
+        # Safe lookup — any unexpected label falls back to TEXT_MUTED via
+        # theme.class_color() instead of raising KeyError. This handles
+        # tracks from older runs or non-vehicle models that emit class
+        # names not in our default palette.
+        from cctv_yolo.theme import class_color as _class_color
+        class_color = _class_color(class_name)
         class_label = QLabel(class_name.upper())
         class_label.setStyleSheet(f"""
             background: {class_color};

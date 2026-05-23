@@ -10,6 +10,22 @@ numpy>=1.24.0
 
 # Data processing
 tqdm>=4.66.0
+# matplotlib is a transitive dep that newer Ultralytics versions import
+# eagerly via ultralytics.models.yolo.semantic.train (matplotlib.pyplot).
+# Pinning it explicitly so PyInstaller bundles it — otherwise the
+# Windows .exe crashes on first model load with
+# "ModuleNotFoundError: No module named 'matplotlib'".
+matplotlib>=3.5.0
+# pandas + scipy are also transitively needed by Ultralytics utils.
+pandas>=1.5.0
+scipy>=1.10.0
+# pyyaml is needed by Ultralytics for ByteTrack tracker config loading.
+PyYAML>=6.0
+# psutil is used by Ultralytics for GPU monitoring; bundled to avoid a
+# soft-fail warning at first run.
+psutil>=5.9.0
+# seaborn shows up in Ultralytics' plotting paths.
+seaborn>=0.12.0
 
 # Packaging
 pyinstaller>=6.0.0

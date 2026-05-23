@@ -63,18 +63,37 @@ a = Analysis(
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
+        # Transitive deps of newer Ultralytics versions. Without these
+        # the Windows .exe crashes on first model load with
+        # "ModuleNotFoundError: No module named 'matplotlib'" (raised
+        # from ultralytics.models.yolo.semantic.train).
+        'matplotlib',
+        'matplotlib.pyplot',
+        'matplotlib.backends.backend_agg',
+        'pandas',
+        'scipy',
+        'scipy.spatial',
+        'scipy.ndimage',
+        'yaml',                  # ByteTrack tracker config
+        'psutil',                # ultralytics.utils.checks
+        'seaborn',               # ultralytics.utils.plotting
+        'PIL',                   # ultralytics image utils
+        'PIL.Image',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['runtime_hook.py'],
     excludes=[
+        # NOTE: do NOT exclude matplotlib/pandas/scipy here — newer
+        # Ultralytics versions import them eagerly via
+        # ultralytics.models.yolo.semantic.train and ultralytics.utils.
+        # Excluding them broke the Windows .exe with cryptic
+        # "ModuleNotFoundError: No module named 'matplotlib'" on first
+        # model load.
         'tkinter',
-        'matplotlib',
         'IPython',
         'jupyter',
         'notebook',
-        'pandas',
-        'scipy',
         'sklearn',
         'PIL.ImageQt',
         'PyQt5',

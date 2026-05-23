@@ -91,7 +91,21 @@ CLASS_COLORS = {
     "motorcycle": YELLOW,
     "bicycle":    ERROR,
     "person":     OFFWHITE,
+    "unknown":    TEXT_MUTED,     # catch-all for tracks with no/odd class
 }
+
+
+def class_color(class_name: str | None) -> str:
+    """Safe color lookup — never raises KeyError.
+
+    Used by every UI surface that paints a class badge. Falls back to
+    TEXT_MUTED for any class not in CLASS_COLORS so unexpected labels
+    (e.g. "person" from a non-vehicle model, or "unknown" from a bad
+    detection) just render as a muted chip instead of crashing the UI.
+    """
+    if not class_name:
+        return CLASS_COLORS["unknown"]
+    return CLASS_COLORS.get(class_name.lower(), CLASS_COLORS["unknown"])
 
 
 # ---------------------------------------------------------------------------
