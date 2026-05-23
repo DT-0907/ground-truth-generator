@@ -146,6 +146,13 @@ class MainWindow(QMainWindow):
         self.training_tab.review_requested.connect(self.open_review)
         self.insights_tab.review_requested.connect(self.open_review)
 
+        # PRD J7 — "Promote after comparison" flow. When Training fires
+        # compare_models_requested(model_a, model_b), jump to the Performance
+        # tab with both models pre-selected in the A/B compare panel.
+        self.training_tab.compare_models_requested.connect(
+            self._open_perf_compare
+        )
+
         # --- Status bar ---
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -315,6 +322,23 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Review window
     # ------------------------------------------------------------------
+
+    def _open_perf_compare(self, model_a: str, model_b: str):
+        """PRD J7 — handle Training's compare_models_requested signal.
+
+        Switch to the Performance tab and pre-fill its A/B compare panel
+        with the two models so the user can hit Run and see the comparison
+        before deciding to promote.
+        """
+        try:
+            self.performance_tab.prefill_compare(model_a, model_b)
+        except Exception as e:
+            self.status.showMessage(f"Couldn't pre-fill compare: {e}", 5000)
+            return
+        self.tabs.setCurrentWidget(self.performance_tab)
+        self.status.showMessage(
+            f"Pre-filled Performance compare: {model_a} vs {model_b}", 5000
+        )
 
     def open_review(self, session_id: str):
         """Open a review window for the given session."""

@@ -1624,6 +1624,30 @@ class PerformanceTab(QWidget):
     # Model A/B Compare
     # ------------------------------------------------------------------
 
+    def prefill_compare(self, model_a: str, model_b: str) -> None:
+        """Pre-fill the Compare panel's Model A / Model B combos.
+
+        Called by main_window when Training emits compare_models_requested
+        (PRD J7 — "Promote after comparison" flow). Refreshes the pickers
+        first so a newly-trained model that wasn't in the list yet appears.
+        """
+        self._refresh_compare_pickers()
+        for combo, want in ((self.compare_model_a, model_a),
+                             (self.compare_model_b, model_b)):
+            idx = combo.findText(want)
+            if idx < 0:
+                combo.addItem(want, want)
+                idx = combo.findText(want)
+            combo.setCurrentIndex(idx)
+        # If the Compare section is collapsible and collapsed, expand it so
+        # the pre-filled selection is visible.
+        sec = getattr(self, "compare_section", None)
+        if sec is not None and hasattr(sec, "set_expanded"):
+            try:
+                sec.set_expanded(True)
+            except Exception:
+                pass
+
     def _refresh_compare_pickers(self) -> None:
         models = self.dm.list_models()
         for combo in (self.compare_model_a, self.compare_model_b):
