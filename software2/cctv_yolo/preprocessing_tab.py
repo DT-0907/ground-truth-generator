@@ -33,11 +33,9 @@ from cctv_yolo.video_canvas import VideoCanvas
 # ---------------------------------------------------------------------------
 # Style constants
 # ---------------------------------------------------------------------------
-BG = "#1a1a2e"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-ACCENT = "#4ecca3"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 CARD_STYLE = f"""
 QFrame#videoCard {{

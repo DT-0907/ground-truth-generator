@@ -31,10 +31,9 @@ from cctv_yolo.analytics import bbox_in_roi
 from cctv_yolo.visual_search import VisualIndex
 
 
-ACCENT = "#4ecca3"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 ACTION_BTN = f"""
 QPushButton {{

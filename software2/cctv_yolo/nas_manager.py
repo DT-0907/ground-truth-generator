@@ -40,11 +40,10 @@ class NasManager:
 
     def save_config(self, config: dict):
         """Save NAS config (password is base64-encoded on disk)."""
+        from cctv_yolo.data_manager import _atomic_write_json
         safe = dict(config)
         safe["password"] = base64.b64encode(config["password"].encode()).decode()
-        self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_file, "w") as f:
-            json.dump(safe, f, indent=2)
+        _atomic_write_json(self.config_file, safe)
 
     def delete_config(self):
         """Remove saved NAS config from disk."""

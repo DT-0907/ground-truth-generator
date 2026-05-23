@@ -7,76 +7,76 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
+from cctv_yolo.theme import (
+    INDIGO, PANEL, PANEL_HI, BORDER, PURPLE, PINK, OFFWHITE, TEXT_MUTED, ERROR,
+    YELLOW, CLASS_COLORS,
+)
 
-SIDEBAR_STYLE = """
-QWidget#sidebar {
-    background: #16213e;
-    border-left: 1px solid #2d3a5a;
-}
-QLabel {
-    color: #eee;
-}
-QPushButton {
+
+SIDEBAR_STYLE = f"""
+QWidget#sidebar {{
+    background: {PANEL};
+    border-left: 1px solid {BORDER};
+}}
+QLabel {{
+    color: {OFFWHITE};
+}}
+QPushButton {{
     padding: 8px 14px;
-    border: none;
-    border-radius: 4px;
+    border: 1px solid {BORDER};
+    border-radius: 6px;
     font-size: 13px;
     font-weight: 500;
-    background: #2d3a5a;
-    color: #fff;
-}
-QPushButton:hover {
-    background: #3d4a6a;
-}
-QPushButton:disabled {
+    background: {PANEL_HI};
+    color: {OFFWHITE};
+}}
+QPushButton:hover {{
+    background: {PINK};
+    color: {INDIGO};
+    border-color: {PINK};
+}}
+QPushButton:disabled {{
     opacity: 0.5;
-    background: #2d3a5a;
-    color: #666;
-}
-QPushButton#delete_btn { background: #e74c3c; color: #fff; }
-QPushButton#delete_btn:hover { background: #c0392b; }
-QPushButton#class_btn { background: #3498db; color: #fff; }
-QPushButton#class_btn:hover { background: #2980b9; }
-QPushButton#merge_btn { background: #9b59b6; color: #fff; }
-QPushButton#merge_btn:hover { background: #8e44ad; }
-QPushButton#split_btn { background: #f39c12; color: #000; }
-QPushButton#split_btn:hover { background: #d68910; }
-QPushButton#save_btn { background: #4ecca3; color: #000; }
-QPushButton#save_btn:hover { background: #3db892; }
-QScrollArea { border: none; background: transparent; }
-QCheckBox {
-    color: #888;
+    background: {BORDER};
+    color: {TEXT_MUTED};
+}}
+QPushButton#delete_btn {{ background: {ERROR}; color: {OFFWHITE}; border-color: {ERROR}; }}
+QPushButton#delete_btn:hover {{ background: {PINK}; border-color: {PINK}; color: {INDIGO}; }}
+QPushButton#class_btn {{ background: {PURPLE}; color: {OFFWHITE}; border-color: {PURPLE}; }}
+QPushButton#class_btn:hover {{ background: {PINK}; border-color: {PINK}; color: {INDIGO}; }}
+QPushButton#merge_btn {{ background: {PURPLE}; color: {OFFWHITE}; border-color: {PURPLE}; }}
+QPushButton#merge_btn:hover {{ background: {PINK}; border-color: {PINK}; color: {INDIGO}; }}
+QPushButton#split_btn {{ background: {YELLOW}; color: {INDIGO}; border-color: {YELLOW}; }}
+QPushButton#split_btn:hover {{ background: {PINK}; border-color: {PINK}; color: {INDIGO}; }}
+QPushButton#save_btn {{ background: {PINK}; color: {INDIGO}; border-color: {PINK}; }}
+QPushButton#save_btn:hover {{ background: {PURPLE}; color: {OFFWHITE}; border-color: {PURPLE}; }}
+QScrollArea {{ border: none; background: transparent; }}
+QCheckBox {{
+    color: {TEXT_MUTED};
     font-size: 11px;
     spacing: 4px;
-}
-QCheckBox:disabled {
-    color: #555;
-}
-QCheckBox::indicator {
+}}
+QCheckBox:disabled {{
+    color: {BORDER};
+}}
+QCheckBox::indicator {{
     width: 14px;
     height: 14px;
-    border: 1px solid #2d3a5a;
+    border: 1px solid {BORDER};
     border-radius: 3px;
     background: transparent;
-}
-QCheckBox::indicator:checked {
-    background: #4ecca3;
-    border-color: #4ecca3;
-}
-QCheckBox::indicator:disabled {
-    background: #1a1a2e;
-    border-color: #2d3a5a;
-}
+}}
+QCheckBox::indicator:checked {{
+    background: {PURPLE};
+    border-color: {PURPLE};
+}}
+QCheckBox::indicator:disabled {{
+    background: {INDIGO};
+    border-color: {BORDER};
+}}
 """
 
-CLASS_COLORS = {
-    "car": "#3498db",
-    "truck": "#e74c3c",
-    "bus": "#9b59b6",
-    "motorcycle": "#f39c12",
-    "bicycle": "#1abc9c",
-    "unknown": "#95a5a6",
-}
+# CLASS_COLORS for badges is imported from theme.py (palette-harmonised).
 
 
 class TrackItem(QFrame):

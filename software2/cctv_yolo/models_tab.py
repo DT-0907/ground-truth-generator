@@ -31,10 +31,9 @@ from PySide6.QtWidgets import (
 from cctv_yolo.model_compare import ModelCompareWorker
 
 
-ACCENT = "#4ecca3"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 ACTION_BTN = f"""
 QPushButton {{

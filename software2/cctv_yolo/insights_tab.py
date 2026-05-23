@@ -30,10 +30,9 @@ from cctv_yolo import dataset_health, anomaly
 from cctv_yolo.confusion import ConfusionMatrixWorker
 
 
-ACCENT = "#4ecca3"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 ACTION_BTN = f"""
 QPushButton {{

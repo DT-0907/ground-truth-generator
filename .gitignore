@@ -52,3 +52,12 @@ test/models/
 # Claude work
 claude-work/venv/
 claude-work/data/
+
+# Runtime data the app creates inside the repo (because macOS case-insensitive
+# FS merges ~/Documents/CCTV-YOLO with ~/Documents/cctv-yolo).
+logs/
+.planning/
+.bak/
+config/
+models/
+data/.DS_Store

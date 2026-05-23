@@ -1,22 +1,105 @@
 """
 Data manager — all file I/O for tracks, corrections, videos, exports.
 Replaces Flask routes with direct Python calls.
+
+PRD F4-1: emits Qt signals (``corrections_changed``, ``groups_changed``,
+``tracks_changed``) so dependent tabs auto-refresh without manual buttons.
 """
 import json
+import logging
 import os
 import re
 import sys
+import tempfile
 import cv2
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+from PySide6.QtCore import QObject, Signal
 
-class DataManager:
-    """Centralized data access — no HTTP, direct file operations."""
+logger = logging.getLogger(__name__)
+
+
+def _atomic_write_json(path: Path, data: dict, *, indent: int = 2, backup: bool = False, keep_backups: int = 5) -> None:
+    """Write JSON atomically. Power loss / disk full mid-write can't corrupt
+    the destination — we write to a temp file in the same directory and then
+    os.replace() into place (atomic on POSIX and Windows).
+
+    PRD C3 — used by every save in the app.
+
+    Args:
+        path: destination path
+        data: JSON-serializable dict
+        indent: pretty-print indent (default 2)
+        backup: if True and `path` already exists, copy it to a timestamped
+                .bak file in `<dir>/.bak/<stem>-<timestamp>.json` BEFORE
+                writing. Keeps the last ``keep_backups`` per stem.
+        keep_backups: how many .bak rotations to retain per stem
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if backup and path.exists():
+        bak_dir = path.parent / ".bak"
+        bak_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        bak_path = bak_dir / f"{path.stem}-{ts}{path.suffix}"
+        try:
+            bak_path.write_bytes(path.read_bytes())
+        except OSError as e:
+            logger.warning("Couldn't write backup %s: %s", bak_path, e)
+
+        # Rotate: keep only the N most recent .bak for this stem
+        try:
+            siblings = sorted(
+                bak_dir.glob(f"{path.stem}-*{path.suffix}"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            for stale in siblings[keep_backups:]:
+                stale.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Couldn't rotate backups for %s: %s", path.stem, e)
+
+    # Write to a temp file in the same directory (same filesystem → atomic rename)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.stem}-", suffix=f"{path.suffix}.tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        # Clean up the temp file on any failure so we don't leave debris.
+        try:
+            Path(tmp_name).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+class DataManager(QObject):
+    """Centralized data access — no HTTP, direct file operations.
+
+    Inherits QObject so it can emit Qt signals (PRD F4-1, Part M).
+    """
+
+    # PRD F4-1 — fires after any save_corrections() completes. Training tab,
+    # Insights tab, and the Active Learning queue subscribe to auto-refresh.
+    corrections_changed = Signal(str)   # emits session_id
+
+    # PRD M — fires after group create/delete/rename/recolor/membership change.
+    groups_changed = Signal()
+
+    # Optional: fires after save_tracks() — useful for tabs caching session lists.
+    tracks_changed = Signal(str)        # emits session_id
 
     def __init__(self):
+        super().__init__()
         # On macOS the case-insensitive filesystem deliberately makes
         # ~/Documents/CCTV-YOLO/ resolve to the project repo at
         # ~/Documents/cctv-yolo/ — that's the intended dev-mode layout
@@ -100,8 +183,7 @@ class DataManager:
             except (json.JSONDecodeError, OSError):
                 pass
         data["last_model"] = model_name
-        with open(config_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(config_file, data)
 
     def get_last_confidence(self) -> float:
         """Read the last-used confidence threshold from config."""
@@ -126,8 +208,7 @@ class DataManager:
             except (json.JSONDecodeError, OSError):
                 pass
         data["last_confidence"] = conf
-        with open(config_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(config_file, data)
 
     # ------------------------------------------------------------------
     # Mode switching (local <-> NAS)
@@ -376,16 +457,24 @@ class DataManager:
         return data
 
     def save_corrections(self, session_id: str, data: dict):
-        """Save corrected track data."""
+        """Save corrected track data.
+
+        Atomic write + .bak rotation (keeps last 5 versions in
+        corrections/.bak/). PRD F2-1a/b. Emits ``corrections_changed`` so
+        downstream tabs (Training AL queue, Insights, Analytics, Performance)
+        refresh automatically.
+        """
+        # Schema version field — future migrations land here (PRD F2-1e).
+        data.setdefault("_version", 2)
         correction_file = self.corrections_dir / f"{session_id}.json"
-        with open(correction_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(correction_file, data, backup=True)
+        self.corrections_changed.emit(session_id)
 
     def save_tracks(self, session_id: str, data: dict):
         """Save raw track data (used by processor after detection)."""
         track_file = self.tracks_dir / f"{session_id}.json"
-        with open(track_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(track_file, data)
+        self.tracks_changed.emit(session_id)
 
     def has_corrections(self, session_id: str) -> bool:
         """Check whether corrections exist for a session."""
@@ -698,8 +787,7 @@ class DataManager:
             "total_detections": sum(len(a["detections"]) for a in annotations),
             "frames": annotations,
         }
-        with open(ann_file, "w") as f:
-            json.dump(ann_data, f, indent=2)
+        _atomic_write_json(ann_file, ann_data)
 
         return exported
 
@@ -792,8 +880,7 @@ class DataManager:
         output_dir = self.exports_dir / session_id
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / "coco_annotations.json"
-        with open(output_file, "w") as f:
-            json.dump(coco_data, f, indent=2)
+        _atomic_write_json(output_file, coco_data)
 
         return output_file
 
@@ -861,8 +948,7 @@ class DataManager:
             data.pop(session_id, None)
         else:
             data[session_id] = roi
-        with open(roi_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(roi_file, data)
 
     # ------------------------------------------------------------------
     # Global Processing ROI
@@ -886,5 +972,4 @@ class DataManager:
         if roi is None:
             roi_file.unlink(missing_ok=True)
         else:
-            with open(roi_file, "w") as f:
-                json.dump(roi, f, indent=2)
+            _atomic_write_json(roi_file, roi)

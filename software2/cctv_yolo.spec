@@ -7,11 +7,33 @@ Builds:
   Windows -> CCTV-YOLO.exe  (single-folder distribution)
 """
 
+import ast
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 sys.setrecursionlimit(10000)
+
+
+def _read_version_constants():
+    """Pull __version__ etc. out of cctv_yolo/__version__.py via AST so we don't
+    have to import the cctv_yolo package (which would drag torch/Qt into the
+    spec process). PRD C2 — single source of truth for the version string.
+    """
+    tree = ast.parse(Path("cctv_yolo/__version__.py").read_text())
+    consts = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            tgt = node.targets[0]
+            if isinstance(tgt, ast.Name) and isinstance(node.value, ast.Constant):
+                consts[tgt.id] = node.value.value
+    return consts
+
+
+_VC          = _read_version_constants()
+APP_VERSION  = _VC["__version__"]
+APP_NAME     = _VC["__app_name__"]
+BUNDLE_ID    = _VC["__bundle_id__"]
 
 # ultralytics ships YAML configs (bytetrack.yaml, default.yaml) that aren't
 # importable Python — collect_data_files grabs them so YOLO can find them
@@ -90,14 +112,14 @@ if sys.platform == 'darwin':
     )
     app = BUNDLE(
         coll,
-        name='CCTV-YOLO.app',
+        name=f'{APP_NAME}.app',
         icon='cctv_yolo/resources/icon.icns' if Path('cctv_yolo/resources/icon.icns').exists() else None,
-        bundle_identifier='com.cctv-yolo.app',
+        bundle_identifier=BUNDLE_ID,
         info_plist={
-            'CFBundleName': 'CCTV-YOLO',
-            'CFBundleDisplayName': 'CCTV-YOLO',
-            'CFBundleVersion': '2.0.0',
-            'CFBundleShortVersionString': '2.0.0',
+            'CFBundleName': APP_NAME,
+            'CFBundleDisplayName': APP_NAME,
+            'CFBundleVersion': APP_VERSION,
+            'CFBundleShortVersionString': APP_VERSION,
             'NSHighResolutionCapable': True,
             'LSMinimumSystemVersion': '10.15',
         },

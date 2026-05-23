@@ -54,10 +54,9 @@ class BatchQueueStore:
             return []
 
     def save(self, items: list[dict]):
-        tmp = self.path.with_suffix(".tmp")
-        with open(tmp, "w") as f:
-            json.dump(items, f, indent=2)
-        tmp.replace(self.path)
+        # PRD C3: route through DataManager's atomic helper (fsync + os.replace).
+        from cctv_yolo.data_manager import _atomic_write_json
+        _atomic_write_json(self.path, items)
 
     def reset_in_progress_to_queued(self):
         """Resume-on-crash: anything that was processing when the app

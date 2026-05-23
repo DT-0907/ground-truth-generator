@@ -9,6 +9,7 @@ Contains:
 - Settings dialog (File > Settings)
 """
 import shutil
+import sys
 from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
@@ -40,11 +41,9 @@ from cctv_yolo.review_window import ReviewWindow
 # ---------------------------------------------------------------------------
 # Style constants
 # ---------------------------------------------------------------------------
-BG = "#1a1a2e"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-ACCENT = "#4ecca3"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 STYLE = f"""
 QMainWindow {{
@@ -251,6 +250,28 @@ class MainWindow(QMainWindow):
         action_shortcuts.setShortcut(QKeySequence("Ctrl+/"))
         action_shortcuts.triggered.connect(self._show_shortcuts)
         help_menu.addAction(action_shortcuts)
+
+        help_menu.addSeparator()
+        action_show_log = QAction("Show Log Folder", self)
+        action_show_log.triggered.connect(self._show_log_folder)
+        help_menu.addAction(action_show_log)
+
+    def _show_log_folder(self):
+        """PRD C4 — Help → Show Log Folder opens ~/Documents/CCTV-YOLO/logs/."""
+        import subprocess
+        from cctv_yolo.logging_config import get_log_file_path
+        log_path = get_log_file_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(log_path)] if log_path.exists()
+                             else ["open", str(log_path.parent)])
+        elif sys.platform == "win32":
+            if log_path.exists():
+                subprocess.Popen(["explorer", "/select,", str(log_path)])
+            else:
+                subprocess.Popen(["explorer", str(log_path.parent)])
+        else:
+            subprocess.Popen(["xdg-open", str(log_path.parent)])
 
     # ------------------------------------------------------------------
     # Settings dialog

@@ -28,11 +28,9 @@ from PySide6.QtWidgets import (
 from cctv_yolo.batch_queue import BatchQueueManager
 
 # Style constants (match the rest of the app)
-BG = "#1a1a2e"
-PANEL = "#16213e"
-BORDER = "#2d3a5a"
-ACCENT = "#4ecca3"
-TEXT = "#eeeeee"
+from cctv_yolo.theme import (
+    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+)
 
 ACTION_BTN = f"""
 QPushButton {{
