@@ -973,3 +973,180 @@ class DataManager(QObject):
             roi_file.unlink(missing_ok=True)
         else:
             _atomic_write_json(roi_file, roi)
+
+    # ------------------------------------------------------------------
+    # Session Groups (PRD Part M)
+    #
+    # Groups are named collections of sessions ("Snow weather", "Night-time"
+    # etc.). They're used across Performance, Analytics, Insights, Training
+    # to scope multi-session views. Single source of truth here.
+    # ------------------------------------------------------------------
+
+    def _groups_file(self) -> Path:
+        return self.config_dir / "session_groups.json"
+
+    def _load_groups_raw(self) -> dict:
+        f = self._groups_file()
+        if not f.exists():
+            return {"_version": 1, "groups": []}
+        try:
+            with open(f, "r") as fh:
+                data = json.load(fh)
+            if "groups" not in data:
+                data["groups"] = []
+            return data
+        except (json.JSONDecodeError, OSError):
+            logger.warning("session_groups.json unreadable, returning empty")
+            return {"_version": 1, "groups": []}
+
+    def list_groups(self) -> list[dict]:
+        """All groups, sorted by name."""
+        data = self._load_groups_raw()
+        groups = list(data.get("groups", []))
+        groups.sort(key=lambda g: g.get("name", "").lower())
+        return groups
+
+    def get_group(self, group_id: str) -> dict | None:
+        for g in self._load_groups_raw().get("groups", []):
+            if g.get("id") == group_id:
+                return g
+        return None
+
+    def _save_groups(self, data: dict) -> None:
+        _atomic_write_json(self._groups_file(), data)
+        self.groups_changed.emit()
+
+    def create_group(self, name: str, color: str | None = None,
+                     description: str = "") -> str:
+        """Create a new group. Returns its id."""
+        from cctv_yolo.theme import ROI_COLOR_ROTATION
+        data = self._load_groups_raw()
+        # Slug-ify the name for a human-readable id, append a short random
+        # suffix if collision.
+        import uuid
+        base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name.lower()).strip("_") or "group"
+        existing = {g["id"] for g in data["groups"]}
+        gid = base
+        if gid in existing:
+            gid = f"{base}_{uuid.uuid4().hex[:6]}"
+        if not color:
+            # Cycle through palette for visual distinction
+            color = ROI_COLOR_ROTATION[len(data["groups"]) % len(ROI_COLOR_ROTATION)]
+        now = datetime.now().isoformat()
+        data["groups"].append({
+            "id": gid,
+            "name": name,
+            "color": color,
+            "description": description,
+            "session_ids": [],
+            "created_at": now,
+            "updated_at": now,
+        })
+        self._save_groups(data)
+        return gid
+
+    def delete_group(self, group_id: str) -> bool:
+        data = self._load_groups_raw()
+        before = len(data["groups"])
+        data["groups"] = [g for g in data["groups"] if g.get("id") != group_id]
+        if len(data["groups"]) == before:
+            return False
+        self._save_groups(data)
+        return True
+
+    def rename_group(self, group_id: str, new_name: str) -> bool:
+        data = self._load_groups_raw()
+        for g in data["groups"]:
+            if g.get("id") == group_id:
+                g["name"] = new_name
+                g["updated_at"] = datetime.now().isoformat()
+                self._save_groups(data)
+                return True
+        return False
+
+    def recolor_group(self, group_id: str, color: str) -> bool:
+        data = self._load_groups_raw()
+        for g in data["groups"]:
+            if g.get("id") == group_id:
+                g["color"] = color
+                g["updated_at"] = datetime.now().isoformat()
+                self._save_groups(data)
+                return True
+        return False
+
+    def add_to_group(self, group_id: str, session_ids: list[str]) -> int:
+        """Add session_ids to a group, skipping duplicates. Returns count added."""
+        data = self._load_groups_raw()
+        added = 0
+        for g in data["groups"]:
+            if g.get("id") == group_id:
+                existing = set(g.get("session_ids", []))
+                for sid in session_ids:
+                    if sid not in existing:
+                        existing.add(sid)
+                        added += 1
+                g["session_ids"] = sorted(existing)
+                g["updated_at"] = datetime.now().isoformat()
+                self._save_groups(data)
+                return added
+        return 0
+
+    def remove_from_group(self, group_id: str, session_ids: list[str]) -> int:
+        """Remove session_ids from a group. Returns count removed."""
+        data = self._load_groups_raw()
+        for g in data["groups"]:
+            if g.get("id") == group_id:
+                to_remove = set(session_ids)
+                before = len(g.get("session_ids", []))
+                g["session_ids"] = [s for s in g.get("session_ids", []) if s not in to_remove]
+                removed = before - len(g["session_ids"])
+                if removed:
+                    g["updated_at"] = datetime.now().isoformat()
+                    self._save_groups(data)
+                return removed
+        return 0
+
+    def get_sessions_in_group(self, group_id: str) -> list[dict]:
+        """Return session dicts for every session_id in the group that still exists."""
+        g = self.get_group(group_id)
+        if not g:
+            return []
+        all_sessions = {s["id"]: s for s in self.get_sessions()}
+        return [all_sessions[sid] for sid in g.get("session_ids", []) if sid in all_sessions]
+
+    def get_group_stats(self, group_id: str) -> dict:
+        """Aggregate stats across every session in a group.
+
+        Returns dict with total_tracks, class_counts, mean_conf (track-weighted),
+        n_sessions, n_corrected.
+        """
+        sessions = self.get_sessions_in_group(group_id)
+        if not sessions:
+            return {"total_tracks": 0, "class_counts": {}, "mean_conf": 0.0,
+                    "n_sessions": 0, "n_corrected": 0}
+        total_tracks = 0
+        class_counts: dict = defaultdict(int)
+        conf_sum = 0.0
+        n_corrected = 0
+        for s in sessions:
+            if s.get("has_corrections"):
+                n_corrected += 1
+                data = self.load_corrections(s["id"])
+            else:
+                data = self.load_tracks(s["id"])
+            if not data:
+                continue
+            tracks = data.get("tracks", [])
+            for t in tracks:
+                cls = t.get("class", "unknown")
+                class_counts[cls] += 1
+                total_tracks += 1
+                conf_sum += t.get("avg_confidence", 0.0)
+        mean_conf = (conf_sum / total_tracks) if total_tracks else 0.0
+        return {
+            "total_tracks": total_tracks,
+            "class_counts": dict(class_counts),
+            "mean_conf": round(mean_conf, 3),
+            "n_sessions": len(sessions),
+            "n_corrected": n_corrected,
+        }

@@ -160,6 +160,19 @@ class MainWindow(QMainWindow):
     def _setup_menu(self):
         menubar = self.menuBar()
 
+        # --- Global OpenLocationBar in the menu-bar corner (PRD C12). Gives
+        # every tab access to the most-used data folders without per-tab plumbing.
+        from cctv_yolo.widgets.open_location_bar import OpenLocationBar
+        from cctv_yolo.logging_config import get_log_file_path
+        global_bar = OpenLocationBar(self)
+        global_bar.add_folder("Videos", self.data_manager.videos_dir)
+        global_bar.add_folder("Tracks", self.data_manager.tracks_dir)
+        global_bar.add_folder("Corrections", self.data_manager.corrections_dir)
+        global_bar.add_folder("Exports", self.data_manager.exports_dir)
+        global_bar.add_folder("Models", self.data_manager.models_dir)
+        global_bar.add_folder("Logs", lambda: get_log_file_path().parent)
+        menubar.setCornerWidget(global_bar, Qt.TopRightCorner)
+
         # --- File menu ---
         file_menu = menubar.addMenu("File")
 

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QFrame,
 )
 
 from cctv_yolo import analytics as A
@@ -105,7 +106,19 @@ class AnalyticsTab(QWidget):
         self.refresh()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        # PRD H3 fix: Analytics has 9 vertical sections — wrap in a scroll area
+        # so the window doesn't squash everything when it's short.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+
+        inner = QWidget()
+        scroll.setWidget(inner)
+        layout = QVBoxLayout(inner)
         layout.setContentsMargins(12, 12, 12, 12)
 
         header = QLabel("Analytics")
@@ -124,23 +137,30 @@ class AnalyticsTab(QWidget):
         pick_row.addStretch()
         layout.addLayout(pick_row)
 
-        # Heatmap
+        # Heatmap (PRD H2: render result inline so the section isn't empty)
         hm_box = QGroupBox("Path-density heatmap")
-        hm_layout = QHBoxLayout(hm_box)
+        hm_outer = QVBoxLayout(hm_box)
+        hm_row = QHBoxLayout()
         self.hm_sigma = QDoubleSpinBox()
         self.hm_sigma.setRange(2.0, 60.0)
         self.hm_sigma.setSingleStep(2.0)
         self.hm_sigma.setValue(12.0)
-        hm_layout.addWidget(QLabel("Sigma:"))
-        hm_layout.addWidget(self.hm_sigma)
+        hm_row.addWidget(QLabel("Sigma:"))
+        hm_row.addWidget(self.hm_sigma)
         btn_hm = QPushButton("Render Heatmap")
         btn_hm.setStyleSheet(ACTION_BTN)
         btn_hm.clicked.connect(self._run_heatmap)
-        hm_layout.addWidget(btn_hm)
-        hm_layout.addStretch()
-        self.hm_status = QLabel("")
-        self.hm_status.setStyleSheet("color:#aaa;")
-        hm_layout.addWidget(self.hm_status)
+        hm_row.addWidget(btn_hm)
+        hm_row.addStretch()
+        self.hm_status = QLabel("Click \"Render Heatmap\" — result will appear below.")
+        self.hm_status.setStyleSheet("color:#A89BA8; font-size:11px;")
+        hm_row.addWidget(self.hm_status)
+        hm_outer.addLayout(hm_row)
+        self.hm_image = QLabel()
+        self.hm_image.setAlignment(Qt.AlignCenter)
+        self.hm_image.setMinimumHeight(0)
+        self.hm_image.setStyleSheet("background: transparent; border: none;")
+        hm_outer.addWidget(self.hm_image)
         layout.addWidget(hm_box)
 
         # OD matrix
@@ -362,7 +382,18 @@ class AnalyticsTab(QWidget):
         )
 
     def _on_heatmap(self, op, r):
-        self.hm_status.setText(f"saved: {Path(r['path']).name}")
+        # PRD H2: load + display the rendered PNG inline
+        path = Path(r["path"])
+        self.hm_status.setText(f"saved: {path.name}")
+        try:
+            pix = QPixmap(str(path))
+            if not pix.isNull():
+                # Cap height so the section doesn't take over the tab
+                pix = pix.scaledToHeight(360, Qt.SmoothTransformation)
+                self.hm_image.setPixmap(pix)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Couldn't load heatmap pixmap: %s", e)
 
     # ----- OD -----
     def _run_od(self):

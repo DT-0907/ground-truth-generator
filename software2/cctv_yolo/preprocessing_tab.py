@@ -70,13 +70,17 @@ QPushButton {{
 """
 
 STAT_CARD_STYLE = f"""
-QFrame {{
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b2844, stop:1 {PANEL});
+QFrame#statCard {{
+    background-color: {PANEL};
     border: 1px solid {BORDER};
     border-top: 2px solid {ACCENT};
     border-radius: 8px;
     padding: 12px;
+}}
+QFrame#statCard QLabel {{
+    background: transparent;
+    border: none;
+    padding: 0;
 }}
 """
 
@@ -460,6 +464,7 @@ class PreprocessingTab(QWidget):
     def _make_stat_card(self, label_text, value_text):
         """Create a stat card widget and return dict with frame, value_label."""
         frame = QFrame()
+        frame.setObjectName("statCard")
         frame.setStyleSheet(STAT_CARD_STYLE)
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         frame.setFixedHeight(95)

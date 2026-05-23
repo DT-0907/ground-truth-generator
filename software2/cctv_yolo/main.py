@@ -158,20 +158,21 @@ def main():
             background: none;
         }}
 
-        /* --- Group boxes (C13: lighter, header underline, no heavy borders) --- */
+        /* --- Group boxes --- */
         QGroupBox {{
-            border: none;
-            border-top: 1px solid {BORDER};
-            border-radius: 0;
-            margin-top: 18px;
-            padding-top: 20px;
+            border: 1px solid {BORDER};
+            border-top: 2px solid {PURPLE};
+            border-radius: {RADIUS}px;
+            margin-top: 16px;
+            padding-top: 24px;
             font-weight: bold;
             color: {OFFWHITE};
+            background-color: transparent;
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
             subcontrol-position: top left;
-            padding: 0 8px 0 0;
+            padding: 2px 10px;
             color: {PURPLE};
         }}
 
