@@ -1,3 +1,0 @@
-# Counting module
-
-

@@ -35,32 +35,69 @@ call build_venv\Scripts\activate.bat
 REM ---------- 2. Dependencies ----------
 echo [2/4] Installing dependencies...
 
-REM Pip needs to be current — using `pip install --upgrade pip` can fail mid-replace
-REM on Windows. `python -m pip` avoids the file-lock issue.
+REM Python version sanity check. PyTorch wheels exist for 3.10..3.12 on
+REM Windows. 3.13+ wheels are slow to arrive, especially for CUDA builds.
+for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PY_VER=%%v
+echo Detected Python: %PY_VER%
+echo %PY_VER% | findstr /R "^3\.1[0-2]\." >nul
+if errorlevel 1 (
+    echo.
+    echo WARNING: Python %PY_VER% may not have prebuilt torch wheels.
+    echo          Recommended: install Python 3.10, 3.11, or 3.12 from
+    echo          https://www.python.org/downloads/ and re-run this script.
+    echo.
+    echo Continuing anyway — pip will fail loudly if wheels are missing.
+    echo.
+)
+
+REM Pip needs to be current. `python -m pip` avoids the file-lock issue
+REM that hits when `pip install --upgrade pip` rewrites its own .exe.
 python -m pip install --upgrade pip
 if errorlevel 1 (
     echo ERROR: pip upgrade failed.
+    echo   Check your internet connection and that python.exe is on PATH.
     pause
     exit /b 1
 )
 
-REM Install CUDA-enabled torch so the bundled exe automatically uses an
-REM NVIDIA GPU when one is present (dramatically faster than CPU for YOLO).
-REM On machines WITHOUT a CUDA GPU the same torch falls back to CPU at
-REM runtime via `torch.cuda.is_available()`, so this is strictly better
-REM than the old CPU-only build -- it just costs ~2 GB more on disk.
+REM Install torch. Default = CUDA wheels (cu121) so the bundled exe uses
+REM an NVIDIA GPU when present. On machines without CUDA the same wheels
+REM transparently fall back to CPU via torch.cuda.is_available().
 REM
-REM To opt out and ship a smaller (~200 MB) CPU-only build, set the env
-REM var CCTV_YOLO_CPU_TORCH=1 before running this script.
+REM If the CUDA wheel install fails (no Python wheel available for this
+REM Python version, blocked network, etc.) we AUTOMATICALLY retry with
+REM CPU-only wheels so the build can still complete.
+REM
+REM To skip the CUDA attempt entirely, set CCTV_YOLO_CPU_TORCH=1 first.
+REM Use !ERRORLEVEL! (delayed expansion, requires `setlocal enabledelayedexpansion`
+REM at the top of this file) — `if errorlevel N` nested inside an outer if/else
+REM block evaluates inconsistently in some cmd.exe versions.
+set TORCH_INSTALLED=0
 if defined CCTV_YOLO_CPU_TORCH (
     echo Installing CPU-only torch (CCTV_YOLO_CPU_TORCH=1 set)...
     python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    if !ERRORLEVEL! EQU 0 set TORCH_INSTALLED=1
 ) else (
-    echo Installing CUDA torch (auto-uses NVIDIA GPU when available, falls back to CPU)...
+    echo Installing CUDA torch (auto-uses NVIDIA GPU; falls back to CPU at runtime)...
     python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    if !ERRORLEVEL! EQU 0 (
+        set TORCH_INSTALLED=1
+    ) else (
+        echo.
+        echo WARNING: CUDA torch install failed for Python !PY_VER!.
+        echo          Falling back to CPU-only torch so the build can continue.
+        echo.
+        python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        if !ERRORLEVEL! EQU 0 set TORCH_INSTALLED=1
+    )
 )
-if errorlevel 1 (
-    echo ERROR: torch install failed.
+if "!TORCH_INSTALLED!"=="0" (
+    echo ERROR: both CUDA and CPU torch installs failed.
+    echo   Try one of:
+    echo     - Use Python 3.10, 3.11, or 3.12 (delete build_venv, re-run).
+    echo     - Check your network connection and any corporate proxy.
+    echo     - Run "python -m pip install torch torchvision" manually to see
+    echo       the full error.
     pause
     exit /b 1
 )
@@ -68,6 +105,9 @@ if errorlevel 1 (
 python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo ERROR: requirements install failed.
+    echo   See full pip output above. Often this is ultralytics or
+    echo   opencv-python — try "python -m pip install ultralytics
+    echo   opencv-python" manually to see the underlying error.
     pause
     exit /b 1
 )
@@ -117,7 +157,11 @@ if errorlevel 1 (
 
 REM Ship the diagnostic launcher next to the exe. If CCTV-YOLO.exe won't
 REM open, running CCTV-YOLO-debug.bat captures the real error to a log.
-copy /Y "CCTV-YOLO-debug.bat" "dist\CCTV-YOLO\" >nul
+REM (Best-effort — don't fail the whole build if the debug launcher is
+REM missing for some reason.)
+if exist "CCTV-YOLO-debug.bat" (
+    copy /Y "CCTV-YOLO-debug.bat" "dist\CCTV-YOLO\" >nul
+)
 
 REM ---------- 4. Done ----------
 echo [4/4] Done!
