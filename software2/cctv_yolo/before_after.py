@@ -21,12 +21,47 @@ from cctv_yolo.annotated_export import (
 )
 
 
-def _index(track_data: dict) -> dict[int, list[dict]]:
+def _bbox_center_in_roi(bbox, roi: Optional[dict]) -> bool:
+    """True if the bbox center falls inside ``roi`` (or no ROI supplied)."""
+    if not roi:
+        return True
+    x1, y1, x2, y2 = bbox
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    rtype = roi.get("type", "rect")
+    pts = roi.get("points", [])
+
+    def pt_xy(p):
+        if isinstance(p, dict):
+            return (p.get("x", 0), p.get("y", 0))
+        return p
+
+    if rtype == "rect" and len(pts) == 2:
+        a, b = pt_xy(pts[0]), pt_xy(pts[1])
+        return (min(a[0], b[0]) <= cx <= max(a[0], b[0])
+                and min(a[1], b[1]) <= cy <= max(a[1], b[1]))
+    if rtype == "polygon" and len(pts) >= 3:
+        norm = [pt_xy(p) for p in pts]
+        n = len(norm)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = norm[i]
+            xj, yj = norm[j]
+            if ((yi > cy) != (yj > cy)) and (cx < (xj - xi) * (cy - yi) / max(1e-9, (yj - yi)) + xi):
+                inside = not inside
+            j = i
+        return inside
+    return True
+
+
+def _index(track_data: dict, processing_roi: Optional[dict] = None) -> dict[int, list[dict]]:
     out: dict[int, list[dict]] = defaultdict(list)
     for tr in track_data.get("tracks", []):
         cls = tr.get("class", "vehicle")
         tid = tr.get("track_id")
         for fd in tr.get("frames", []):
+            if processing_roi and not _bbox_center_in_roi(fd["bbox"], processing_roi):
+                continue
             out[fd["frame"]].append({
                 "bbox": fd["bbox"], "class": cls, "track_id": tid,
                 "interpolated": fd.get("interpolated", False),
@@ -98,6 +133,7 @@ def render_before_after(
     corrected_data: dict,
     output_path: Path,
     progress_callback=None,
+    processing_roi: Optional[dict] = None,
 ) -> dict:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,8 +154,8 @@ def render_before_after(
         cap.release()
         raise RuntimeError(f"Cannot open writer: {output_path}")
 
-    raw_idx = _index(raw_data)
-    corr_idx = _index(corrected_data)
+    raw_idx = _index(raw_data, processing_roi=processing_roi)
+    corr_idx = _index(corrected_data, processing_roi=processing_roi)
     raw_rois = raw_data.get("rois", []) or []
     corr_rois = corrected_data.get("rois", []) or []
 
@@ -179,11 +215,13 @@ class BeforeAfterWorker(QThread):
     failed = Signal(str, str)
 
     def __init__(self, data_manager, session_id: str,
-                 output_path: Optional[Path] = None, parent=None):
+                 output_path: Optional[Path] = None,
+                 processing_roi: Optional[dict] = None, parent=None):
         super().__init__(parent)
         self.dm = data_manager
         self.session_id = session_id
         self.output_path = output_path
+        self.processing_roi = processing_roi
 
     def run(self):
         try:
@@ -207,6 +245,7 @@ class BeforeAfterWorker(QThread):
             stats = render_before_after(
                 video_path, raw, corr, self.output_path,
                 progress_callback=lambda p: self.progress.emit(self.session_id, p),
+                processing_roi=self.processing_roi,
             )
             self.finished_ok.emit(self.session_id, str(self.output_path), stats)
         except Exception as e:

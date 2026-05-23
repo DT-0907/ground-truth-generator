@@ -9,8 +9,11 @@ Opens as a separate QMainWindow with:
 """
 import copy
 import json
+import uuid
+from datetime import datetime
+from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QKeySequence, QIcon, QShortcut
+from PySide6.QtGui import QAction, QKeySequence, QIcon, QShortcut, QColor
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -25,6 +28,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QStatusBar,
     QSizePolicy,
+    QMenu,
+    QFileDialog,
+    QColorDialog,
 )
 
 from cctv_yolo.video_canvas import VideoCanvas
@@ -38,12 +44,14 @@ from cctv_yolo.dialogs import (
     RoiNameDialog,
     RenameRoiDialog,
 )
+from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 
 # ---------------------------------------------------------------------------
 # Style constants
 # ---------------------------------------------------------------------------
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    roi_color as theme_roi_color,
 )
 
 STYLE = f"""
@@ -76,7 +84,7 @@ QToolBar QToolButton:hover {{
 }}
 QToolBar QToolButton:checked {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     font-weight: bold;
 }}
 QPushButton {{
@@ -89,22 +97,22 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #1b2844;
-    border-color: #3d4e73;
+    background-color: #1E2050;
+    border-color: #2D2F60;
 }}
 QPushButton:pressed {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
 }}
 QSlider::groove:horizontal {{
-    background: #0d1525;
+    background: #15173D;
     height: 6px;
     border-radius: 3px;
     border: 1px solid {BORDER};
 }}
 QSlider::sub-page:horizontal {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #2fa87e, stop:1 {ACCENT});
+        stop:0 #E491C9, stop:1 {ACCENT});
     border-radius: 3px;
 }}
 QSlider::handle:horizontal {{
@@ -113,14 +121,14 @@ QSlider::handle:horizontal {{
     height: 14px;
     margin: -5px 0;
     border-radius: 7px;
-    border: 2px solid #2fa87e;
+    border: 2px solid #E491C9;
 }}
 QSlider::handle:horizontal:hover {{
-    background: #6fe8c0;
+    background: #E491C9;
     border: 2px solid {ACCENT};
 }}
 QSpinBox {{
-    background-color: #0d1525;
+    background-color: #15173D;
     color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: 6px;
@@ -143,8 +151,8 @@ QStatusBar {{
 
 PLAY_BTN_PLAYING = f"""
 QPushButton {{
-    background-color: #2fa87e;
-    color: #000;
+    background-color: #E491C9;
+    color: #15173D;
     border: 1px solid {ACCENT};
     border-radius: 6px;
     padding: 5px 12px;
@@ -168,14 +176,17 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #1b2844;
-    border-color: #3d4e73;
+    background-color: #1E2050;
+    border-color: #2D2F60;
 }}
 """
 
 MAX_UNDO = 50
 
-ROI_COLORS = ["#ff6b6b", "#4ecdc4", "#45b7d1", "#96ceb4", "#feca57", "#ff9ff3", "#54a0ff", "#5f27cd"]
+# ROI colors come from the theme palette (PRD C11). Use ``theme_roi_color(i)``
+# instead of hard-coded hex anywhere new.
+def _roi_palette_color(index: int) -> str:
+    return theme_roi_color(index)
 
 
 # ---------------------------------------------------------------------------
@@ -291,10 +302,40 @@ class ReviewWindow(QMainWindow):
 
         self.btn_roi_rect = self._add_tool_button("ROI Rect (Shift+R)", checkable=True)
         self.btn_roi_poly = self._add_tool_button("ROI Poly (Shift+P)", checkable=True)
+        self.toolbar.addSeparator()
+
+        # Export menu (PRD F4) — single button opens grouped QMenu
+        self.btn_export = QPushButton("Export…")
+        self.btn_export.setMinimumHeight(28)
+        self.btn_export.clicked.connect(self._show_export_menu)
+        self.toolbar.addWidget(self.btn_export)
 
         self.lbl_mode = QLabel("  Mode: Select")
         self.lbl_mode.setStyleSheet(f"color: {ACCENT}; font-weight: bold; padding: 0 8px;")
         self.toolbar.addWidget(self.lbl_mode)
+
+        # OpenLocationBar (PRD C12) — push right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(spacer)
+        self.open_bar = OpenLocationBar(self)
+        self.open_bar.add_file(
+            "Session Video",
+            lambda: self.data_manager.get_video_path(self.session_id),
+        )
+        self.open_bar.add_file(
+            "Tracks JSON",
+            lambda: self.data_manager.tracks_dir / f"{self.session_id}.json",
+        )
+        self.open_bar.add_file(
+            "Corrections JSON",
+            lambda: self.data_manager.corrections_dir / f"{self.session_id}.json",
+        )
+        self.open_bar.add_folder(
+            "Exports",
+            lambda: self.data_manager.exports_dir / self.session_id,
+        )
+        self.toolbar.addWidget(self.open_bar)
 
         # Connect toolbar buttons (QAction uses .triggered, not .clicked)
         self.btn_select.triggered.connect(lambda: self._set_mode("select"))
@@ -368,7 +409,7 @@ class ReviewWindow(QMainWindow):
 
         self.lbl_frame_info = QLabel("Frame 0 / 0")
         self.lbl_frame_info.setMinimumWidth(150)
-        self.lbl_frame_info.setStyleSheet(f"color: #8899aa; font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace;")
+        self.lbl_frame_info.setStyleSheet(f"color: #A89BA8; font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace;")
 
         frame_layout.addWidget(self.btn_play)
         frame_layout.addWidget(self.btn_step_back)
@@ -414,6 +455,7 @@ class ReviewWindow(QMainWindow):
         self.sidebar.back_requested.connect(self.close)
         self.sidebar.roi_delete_requested.connect(self._delete_roi)
         self.sidebar.roi_rename_requested.connect(self._rename_roi)
+        self.sidebar.roi_recolor_requested.connect(self._recolor_roi)
         self.sidebar.roi_selection_changed.connect(self._on_roi_selection_changed)
 
     def _add_tool_button(self, text, checkable=False, checked=False):
@@ -480,6 +522,13 @@ class ReviewWindow(QMainWindow):
 
         self.tracks = data.get("tracks", [])
         self.rois = data.get("rois", [])
+        # Backfill missing UUID/created_at on legacy ROIs so the rest of
+        # the app can always rely on rois[].id (PRD F3-1).
+        for r in self.rois:
+            if not r.get("id"):
+                r["id"] = uuid.uuid4().hex[:12]
+            if not r.get("created_at"):
+                r["created_at"] = datetime.now().isoformat(timespec="seconds")
         self.fps = data.get("fps", 30)
         self.total_frames = data.get("total_frames", 0)
         self.resolution = data.get("resolution", "")
@@ -1039,10 +1088,12 @@ class ReviewWindow(QMainWindow):
             return
         name = dlg.roi_name()
         roi = {
+            "id": uuid.uuid4().hex[:12],
             "type": "rect",
             "name": name,
             "points": [top_left, bottom_right],
-            "color": ROI_COLORS[len(self.rois) % len(ROI_COLORS)],
+            "color": _roi_palette_color(len(self.rois)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
         }
         self.rois.append(roi)
         self._push_undo()
@@ -1060,10 +1111,12 @@ class ReviewWindow(QMainWindow):
             return
         name = dlg.roi_name()
         roi = {
+            "id": uuid.uuid4().hex[:12],
             "type": "polygon",
             "name": name,
             "points": points,
-            "color": ROI_COLORS[len(self.rois) % len(ROI_COLORS)],
+            "color": _roi_palette_color(len(self.rois)),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
         }
         self.rois.append(roi)
         self._push_undo()
@@ -1100,6 +1153,22 @@ class ReviewWindow(QMainWindow):
                     self._refresh_all()
                     self.status_bar.showMessage(f"ROI renamed to '{new_name}'")
 
+    def _recolor_roi(self, roi_index):
+        """Pick a new color for an ROI (PRD F3-1)."""
+        if not (0 <= roi_index < len(self.rois)):
+            return
+        current = QColor(self.rois[roi_index].get("color", "#F1E9E9"))
+        new_color = QColorDialog.getColor(current, self, "Choose ROI color")
+        if not new_color.isValid():
+            return
+        self.rois[roi_index]["color"] = new_color.name()
+        self._push_undo()
+        self._mark_unsaved()
+        self._refresh_all()
+        self.status_bar.showMessage(
+            f"ROI '{self.rois[roi_index].get('name', '?')}' recolored"
+        )
+
     def _on_roi_selection_changed(self):
         """Handle ROI checkbox selection changes — update canvas dimming."""
         self._apply_roi_filter()
@@ -1114,6 +1183,14 @@ class ReviewWindow(QMainWindow):
             }
         else:
             self.canvas.dimmed_track_ids = set()
+        # PRD F3-1: pass selected ROI indices to the canvas so _paint_rois
+        # knows which ROI gets the OFFWHITE focus stroke and which to dim.
+        try:
+            self.canvas.selected_roi_indices = set(
+                self.sidebar.get_selected_roi_indices()
+            )
+        except Exception:
+            self.canvas.selected_roi_indices = set()
         self.canvas.update()
 
     # ------------------------------------------------------------------
@@ -1160,7 +1237,11 @@ class ReviewWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _save(self):
-        """Save corrections to disk."""
+        """Save corrections to disk.
+
+        PRD F2-1f: any save error pops a toast and opens the corrections
+        folder so the user can diagnose (e.g. permissions, full disk).
+        """
         # Build the session data to save
         base_data = self.data_manager.load_session_data(self.session_id) or {}
         save_data = {
@@ -1176,12 +1257,249 @@ class ReviewWindow(QMainWindow):
             if key not in save_data:
                 save_data[key] = base_data[key]
 
-        self.data_manager.save_corrections(self.session_id, save_data)
+        try:
+            self.data_manager.save_corrections(self.session_id, save_data)
+        except Exception as e:
+            # Pop a toast then open the corrections folder so the user can
+            # check what went wrong (permissions, no space, etc).
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Save failed: {e}\n\nFile location opened for diagnosis.",
+            )
+            try:
+                self.data_manager.open_folder("corrections")
+            except Exception:
+                pass
+            self.status_bar.showMessage(f"Save failed: {e}")
+            return
+
         self.unsaved = False
         self.sidebar.set_unsaved(False)
         self.setWindowTitle(f"Review — {self.video_name or self.session_id}")
         self._update_review_progress()
         self.status_bar.showMessage("Corrections saved")
+
+    # ------------------------------------------------------------------
+    # Export menu (PRD F4)
+    # ------------------------------------------------------------------
+
+    def _active_roi_filter_id(self) -> str | None:
+        """Return the ROI id (or name) the user has filtered to, or None.
+
+        Honors the ROI panel's selected ROIs — single-select becomes the
+        filter, multi-select disables the filter (no sensible filter).
+        """
+        try:
+            sel = self.sidebar.get_selected_roi_indices()
+        except Exception:
+            return None
+        if len(sel) != 1:
+            return None
+        idx = next(iter(sel))
+        if 0 <= idx < len(self.rois):
+            roi = self.rois[idx]
+            return roi.get("id") or roi.get("name")
+        return None
+
+    def _show_export_menu(self):
+        """Build and pop up the grouped Export menu."""
+        menu = QMenu(self)
+        # Annotation formats
+        menu.addSection("Annotation Formats")
+        menu.addAction("COCO JSON", self._export_coco)
+        menu.addAction("YOLO format", self._export_yolo)
+        menu.addAction("CVAT XML 1.1", self._export_cvat)
+        menu.addAction("MOT Challenge", self._export_mot)
+        # Spreadsheet
+        menu.addSection("Spreadsheet")
+        menu.addAction("CSV per-track stats", self._export_csv_per_track)
+        menu.addAction("CSV per-frame detections", self._export_csv_per_frame)
+        # Visuals
+        menu.addSection("Visuals")
+        menu.addAction("Annotated MP4", self._export_annotated_mp4)
+        menu.addAction("Per-track frame stills", self._export_frame_stills)
+        # Report
+        menu.addSection("Report")
+        menu.addAction("Summary PDF", self._export_summary_pdf)
+        menu.addAction("Generate Review Pack (zip)", self._export_review_pack)
+        # Show below the button
+        menu.exec(self.btn_export.mapToGlobal(self.btn_export.rect().bottomLeft()))
+
+    def _ensure_data_for_export(self) -> dict | None:
+        """Build the data payload (tracks + rois + meta) for an export.
+
+        Uses the in-memory session state so unsaved edits are exported too.
+        """
+        return {
+            "tracks": self.tracks,
+            "rois": self.rois,
+            "fps": self.fps,
+            "total_frames": self.total_frames,
+            "resolution": self.resolution,
+            "video_name": self.video_name,
+        }
+
+    def _export_output_dir(self, fmt: str) -> Path:
+        out = self.data_manager.exports_dir / self.session_id / fmt
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
+    def _export_done(self, label: str, path: Path):
+        """Toast + open the folder containing the export."""
+        self.status_bar.showMessage(f"{label} exported -> {path}")
+        QMessageBox.information(
+            self,
+            "Export complete",
+            f"{label} exported to:\n{path}",
+        )
+
+    def _export_failed(self, label: str, err: Exception):
+        QMessageBox.critical(self, "Export failed", f"{label} export failed:\n{err}")
+        self.status_bar.showMessage(f"{label} export failed: {err}")
+
+    def _export_coco(self):
+        try:
+            roi_id = self._active_roi_filter_id()
+            path = self.data_manager.export_coco(self.session_id, roi_id=roi_id)
+            self._export_done("COCO JSON", path)
+        except Exception as e:
+            self._export_failed("COCO", e)
+
+    def _export_yolo(self):
+        try:
+            from cctv_yolo.training import build_yolo_dataset
+            out_root = self._export_output_dir("yolo")
+            stats = build_yolo_dataset(
+                self.data_manager,
+                output_root=out_root,
+                restrict_session_ids=[self.session_id],
+            )
+            self._export_done("YOLO dataset", out_root)
+        except Exception as e:
+            self._export_failed("YOLO", e)
+
+    def _export_cvat(self):
+        try:
+            from cctv_yolo.exports.cvat_writer import write_cvat_xml
+            out_dir = self._export_output_dir("cvat")
+            path = out_dir / f"{self.session_id}.cvat.xml"
+            w, h = 0, 0
+            if self.resolution and "x" in str(self.resolution):
+                try:
+                    w, h = (int(x) for x in str(self.resolution).split("x"))
+                except ValueError:
+                    pass
+            write_cvat_xml(
+                path,
+                self._ensure_data_for_export(),
+                video_name=self.video_name or self.session_id,
+                width=w,
+                height=h,
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("CVAT XML", path)
+        except Exception as e:
+            self._export_failed("CVAT", e)
+
+    def _export_mot(self):
+        try:
+            from cctv_yolo.exports.mot_writer import write_mot_txt
+            out_dir = self._export_output_dir("mot")
+            path = out_dir / "gt.txt"
+            write_mot_txt(
+                path,
+                self._ensure_data_for_export(),
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("MOT Challenge", path)
+        except Exception as e:
+            self._export_failed("MOT", e)
+
+    def _export_csv_per_track(self):
+        try:
+            from cctv_yolo.exports.csv_writer import write_per_track_csv
+            out_dir = self._export_output_dir("csv")
+            path = out_dir / f"{self.session_id}_per_track.csv"
+            write_per_track_csv(
+                path,
+                self._ensure_data_for_export(),
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("Per-track CSV", path)
+        except Exception as e:
+            self._export_failed("CSV (per-track)", e)
+
+    def _export_csv_per_frame(self):
+        try:
+            from cctv_yolo.exports.csv_writer import write_per_frame_csv
+            out_dir = self._export_output_dir("csv")
+            path = out_dir / f"{self.session_id}_per_frame.csv"
+            write_per_frame_csv(
+                path,
+                self._ensure_data_for_export(),
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("Per-frame CSV", path)
+        except Exception as e:
+            self._export_failed("CSV (per-frame)", e)
+
+    def _export_annotated_mp4(self):
+        try:
+            from cctv_yolo.annotated_export import annotate_video
+            out_dir = self._export_output_dir("annotated")
+            path = out_dir / f"{self.session_id}_annotated.mp4"
+            video_path = self.data_manager.get_video_path(self.session_id)
+            if not video_path:
+                raise FileNotFoundError("Video not found for session")
+            annotate_video(
+                video_path=video_path,
+                track_data=self._ensure_data_for_export(),
+                output_path=path,
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("Annotated MP4", path)
+        except Exception as e:
+            self._export_failed("Annotated MP4", e)
+
+    def _export_frame_stills(self):
+        try:
+            count = self.data_manager.export_labeled_images(self.session_id)
+            out_dir = self.data_manager.exports_dir / self.session_id / "labeled"
+            self._export_done(f"Per-track frame stills ({count})", out_dir)
+        except Exception as e:
+            self._export_failed("Frame stills", e)
+
+    def _export_summary_pdf(self):
+        try:
+            from cctv_yolo.exports.review_pack import _build_summary_pdf
+            out_dir = self._export_output_dir("report")
+            path = out_dir / f"{self.session_id}_summary.pdf"
+            ok = _build_summary_pdf(
+                path,
+                self._ensure_data_for_export(),
+                self.session_id,
+                self.video_name or "",
+            )
+            if not ok:
+                raise RuntimeError(
+                    "reportlab is not installed. Run: pip install reportlab"
+                )
+            self._export_done("Summary PDF", path)
+        except Exception as e:
+            self._export_failed("Summary PDF", e)
+
+    def _export_review_pack(self):
+        try:
+            from cctv_yolo.exports.review_pack import build_review_pack
+            zip_path = build_review_pack(
+                self.data_manager,
+                self.session_id,
+                roi_id=self._active_roi_filter_id(),
+            )
+            self._export_done("Review Pack (zip)", zip_path)
+        except Exception as e:
+            self._export_failed("Review Pack", e)
 
     # ------------------------------------------------------------------
     # UI refresh helpers
@@ -1191,8 +1509,9 @@ class ReviewWindow(QMainWindow):
         self.unsaved = True
         self.sidebar.set_unsaved(True)
         title = self.windowTitle()
-        if not title.startswith("* "):
-            self.setWindowTitle(f"* {title}")
+        # PRD F2-1c: bullet (● ) dirty indicator at the start of the title.
+        if not title.startswith("● ") and not title.startswith("* "):
+            self.setWindowTitle(f"● {title}")
 
     def _refresh_sidebar(self):
         """Refresh the sidebar with current state."""

@@ -69,7 +69,7 @@ class TimelineMinimap(QWidget):
         w = self.width()
         h = self.height()
         # Background
-        p.fillRect(self.rect(), QColor("#0e1424"))
+        p.fillRect(self.rect(), QColor("#15173D"))
 
         if not self._tracks or w < 4:
             self._draw_playhead(p)

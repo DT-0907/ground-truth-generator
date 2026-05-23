@@ -317,6 +317,231 @@ def write_speeds_csv(speeds: list[dict], output_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Group-aggregate variants (PRD H4)
+# ---------------------------------------------------------------------------
+
+def aggregate_group_heatmap(
+    data_manager,
+    session_ids: list,
+    output_path: Path,
+    sigma: float = 12.0,
+    alpha: float = 0.6,
+) -> Path:
+    """Render heatmaps for every session and pixel-sum them into a single
+    composite heatmap over the first session's base frame."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not session_ids:
+        raise ValueError("No sessions to aggregate")
+
+    # Use the first session's video as base canvas + size reference.
+    base_frame = None
+    accum = None
+    base_shape = None
+
+    for sid in session_ids:
+        data = data_manager.load_session_data(sid)
+        if not data:
+            continue
+        video_path = data_manager.get_video_path(sid)
+        if not video_path:
+            continue
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            continue
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, min(total // 4, 60))
+        ret, frame = cap.read()
+        cap.release()
+        if not ret or frame is None:
+            continue
+        h, w = frame.shape[:2]
+        if base_frame is None:
+            base_frame = frame
+            base_shape = (h, w)
+            accum = np.zeros(base_shape, dtype=np.float32)
+        # Add tracks from this session, scaling to base frame if size differs.
+        sx = base_shape[1] / w
+        sy = base_shape[0] / h
+        for tr in data.get("tracks", []):
+            for fd in tr.get("frames", []):
+                cx, cy = bbox_center(fd["bbox"])
+                ix = int(round(cx * sx))
+                iy = int(round(cy * sy))
+                if 0 <= ix < base_shape[1] and 0 <= iy < base_shape[0]:
+                    accum[iy, ix] += 1.0
+
+    if base_frame is None or accum is None or accum.max() == 0:
+        raise RuntimeError("No usable session data for group heatmap")
+
+    k = max(3, int(sigma * 3) | 1)
+    accum = cv2.GaussianBlur(accum, (k, k), sigmaX=sigma, sigmaY=sigma)
+    norm = (accum / accum.max() * 255.0).astype(np.uint8)
+    color = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+    blended = cv2.addWeighted(base_frame, 1 - alpha, color, alpha, 0)
+    mask = (norm > 8).astype(np.uint8)
+    final = base_frame.copy()
+    final[mask == 1] = blended[mask == 1]
+    cv2.imwrite(str(output_path), final)
+    return output_path
+
+
+def aggregate_group_od_matrix(data_manager, session_ids: list) -> dict:
+    """Sum per-session OD matrices. Uses the union of ROI names across the
+    group; ROIs are matched by *name*."""
+    all_names: list = []
+    seen = set()
+    per_session_ods = []
+    for sid in session_ids:
+        data = data_manager.load_session_data(sid)
+        if not data:
+            continue
+        od = origin_destination_matrix(data)
+        per_session_ods.append(od)
+        for n in od.get("rois", []):
+            if n not in seen:
+                seen.add(n)
+                all_names.append(n)
+    matrix = {a: {b: 0 for b in all_names} for a in all_names}
+    totals: dict = defaultdict(int)
+    track_count = 0
+    for od in per_session_ods:
+        track_count += od.get("track_count", 0)
+        for a in od.get("rois", []):
+            for b in od.get("rois", []):
+                v = od["matrix"].get(a, {}).get(b, 0)
+                matrix[a][b] += v
+                totals[a] += v
+    return {
+        "rois": all_names,
+        "matrix": matrix,
+        "totals": dict(totals),
+        "track_count": track_count,
+    }
+
+
+def aggregate_group_time_series(
+    data_manager,
+    session_ids: list,
+    output_path: Path,
+    bucket_seconds: int = 60,
+) -> Path:
+    """Concat per-session time-series CSVs with a leading session_id column."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    all_classes: set = set()
+    all_rois: list = []
+    seen = set()
+    per_session_buckets = {}
+
+    for sid in session_ids:
+        data = data_manager.load_session_data(sid)
+        if not data:
+            continue
+        fps = float(data.get("fps", 30.0)) or 30.0
+        rois = data.get("rois", []) or []
+        roi_names = [r.get("name") or f"ROI {i+1}" for i, r in enumerate(rois)]
+        for n in roi_names:
+            if n not in seen:
+                seen.add(n)
+                all_rois.append(n)
+
+        sess_buckets: dict = defaultdict(
+            lambda: {"total": 0, "by_class": defaultdict(int),
+                     "by_roi": defaultdict(int)}
+        )
+        for tr in data.get("tracks", []):
+            frames = tr.get("frames", [])
+            if not frames:
+                continue
+            first_frame = min(f["frame"] for f in frames)
+            bucket = int(first_frame / fps // bucket_seconds)
+            cls = tr.get("class", "vehicle")
+            all_classes.add(cls)
+            sess_buckets[bucket]["total"] += 1
+            sess_buckets[bucket]["by_class"][cls] += 1
+            seen_rois = set()
+            for fd in frames:
+                for name, roi in zip(roi_names, rois):
+                    if name in seen_rois:
+                        continue
+                    if bbox_in_roi(fd["bbox"], roi):
+                        seen_rois.add(name)
+            for name in seen_rois:
+                sess_buckets[bucket]["by_roi"][name] += 1
+        per_session_buckets[sid] = sess_buckets
+
+    classes = sorted(all_classes)
+    with open(output_path, "w", newline="") as f:
+        w = csv.writer(f)
+        header = ["session_id", "bucket_start_sec", "bucket_label", "total"]
+        header += [f"class:{c}" for c in classes]
+        header += [f"roi:{n}" for n in all_rois]
+        w.writerow(header)
+        for sid, buckets in per_session_buckets.items():
+            if not buckets:
+                continue
+            max_b = max(buckets.keys())
+            for b in range(max_b + 1):
+                data = buckets.get(b, {"total": 0, "by_class": {}, "by_roi": {}})
+                start_sec = b * bucket_seconds
+                mm = start_sec // 60
+                ss = start_sec % 60
+                label = f"{mm:02d}:{ss:02d}"
+                row = [sid, start_sec, label, data["total"]]
+                row += [data["by_class"].get(c, 0) for c in classes]
+                row += [data["by_roi"].get(n, 0) for n in all_rois]
+                w.writerow(row)
+    return output_path
+
+
+def aggregate_group_speeds(
+    data_manager,
+    session_ids: list,
+    pixels_per_meter: float,
+) -> list[dict]:
+    """All per-track speeds across the group, each row tagged with session_id."""
+    out: list[dict] = []
+    for sid in session_ids:
+        data = data_manager.load_session_data(sid)
+        if not data:
+            continue
+        rows = estimate_speeds(data, pixels_per_meter=pixels_per_meter)
+        for r in rows:
+            r["session_id"] = sid
+        out.extend(rows)
+    return out
+
+
+def write_group_speeds_csv(speeds: list[dict], output_path: Path) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cols = ["session_id", "track_id", "class", "subclass",
+            "avg_speed_mph", "peak_speed_mph",
+            "avg_speed_kph", "peak_speed_kph", "samples"]
+    with open(output_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for row in speeds:
+            w.writerow({k: row.get(k, "") for k in cols})
+    return output_path
+
+
+def aggregate_group_direction(data_manager, session_ids: list) -> dict:
+    """Sum N/S/E/W counts per ROI name across every session in the group."""
+    out: dict = defaultdict(lambda: {"N": 0, "S": 0, "E": 0, "W": 0, "total": 0})
+    for sid in session_ids:
+        data = data_manager.load_session_data(sid)
+        if not data:
+            continue
+        d = direction_of_travel(data)
+        for roi_name, counts in d.items():
+            for k in ("N", "S", "E", "W", "total"):
+                out[roi_name][k] += counts.get(k, 0)
+    return dict(out)
+
+
+# ---------------------------------------------------------------------------
 # 5. Direction-of-travel per ROI
 # ---------------------------------------------------------------------------
 

@@ -4,9 +4,13 @@ Preprocessing tab -- video grid with model picker and processing controls.
 Combines the video management from videos_tab.py with a YOLO model picker
 (dropdown + Browse button) and confidence slider.
 """
+import json
 import shutil
-import cv2
+import time
+from datetime import datetime
 from pathlib import Path
+
+import cv2
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
@@ -21,21 +25,46 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QFrame,
     QSizePolicy,
+    QSpinBox,
     QProgressBar,
     QMessageBox,
     QFileDialog,
     QCheckBox,
+    QSplitter,
 )
 
 from cctv_yolo.processing import ProcessingWorker, ExportWorker
 from cctv_yolo.video_canvas import VideoCanvas
+from cctv_yolo.widgets.open_location_bar import OpenLocationBar
+from cctv_yolo.widgets.preset_picker import PresetPicker
 
 # ---------------------------------------------------------------------------
 # Style constants
 # ---------------------------------------------------------------------------
 from cctv_yolo.theme import (
-    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    INDIGO as BG,
+    PANEL,
+    BORDER,
+    PURPLE as ACCENT,
+    PURPLE,
+    PINK,
+    OFFWHITE as TEXT,
+    TEXT_MUTED,
 )
+
+
+def _format_eta(eta_seconds: float) -> str:
+    """Format ETA in seconds as 'Xm YYs' or 'Xh Ym'."""
+    if eta_seconds is None or eta_seconds <= 0 or eta_seconds != eta_seconds:
+        return "—"
+    eta = int(eta_seconds)
+    if eta < 60:
+        return f"{eta}s"
+    if eta < 3600:
+        return f"{eta // 60}m {eta % 60:02d}s"
+    hours = eta // 3600
+    mins = (eta % 3600) // 60
+    return f"{hours}h {mins:02d}m"
 
 CARD_STYLE = f"""
 QFrame#videoCard {{
@@ -44,14 +73,14 @@ QFrame#videoCard {{
     border-radius: 8px;
 }}
 QFrame#videoCard:hover {{
-    border: 1px solid rgba(78, 204, 163, 0.4);
-    background-color: #1b2844;
+    border: 1px solid {PINK};
+    background-color: #1E2050;
 }}
 """
 
 CARD_SELECTED_STYLE = f"""
 QFrame#videoCard {{
-    background-color: #1b2844;
+    background-color: #1E2050;
     border: 2px solid {ACCENT};
     border-radius: 8px;
 }}
@@ -60,7 +89,7 @@ QFrame#videoCard {{
 ROI_BTN_ACTIVE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 4px 10px;
@@ -87,7 +116,7 @@ QFrame#statCard QLabel {{
 ACTION_BTN = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: {TEXT};
     border: none;
     border-radius: 4px;
     padding: 4px 10px;
@@ -95,11 +124,28 @@ QPushButton {{
     font-size: 11px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: {PINK};
+    color: {BG};
 }}
 QPushButton:disabled {{
     background-color: {BORDER};
-    color: #666;
+    color: {TEXT_MUTED};
+}}
+"""
+
+CANCEL_BTN = f"""
+QPushButton {{
+    background-color: transparent;
+    color: {PINK};
+    border: 1px solid {PINK};
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: bold;
+}}
+QPushButton:hover {{
+    background-color: {PINK};
+    color: {BG};
 }}
 """
 
@@ -114,11 +160,11 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background-color: {ACCENT};
-    color: #000;
+    color: {TEXT};
 }}
 QPushButton:disabled {{
     border-color: {BORDER};
-    color: #666;
+    color: {TEXT_MUTED};
 }}
 """
 
@@ -139,14 +185,14 @@ QComboBox QAbstractItemView {{
     color: {TEXT};
     border: 1px solid {BORDER};
     selection-background-color: {ACCENT};
-    selection-color: #000;
+    selection-color: #15173D;
 }}
 """
 
 PROCESS_ALL_BTN = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: {TEXT};
     border: none;
     border-radius: 4px;
     padding: 8px 20px;
@@ -154,11 +200,12 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: {PINK};
+    color: {BG};
 }}
 QPushButton:disabled {{
     background-color: {BORDER};
-    color: #666;
+    color: {TEXT_MUTED};
 }}
 """
 
@@ -192,8 +239,8 @@ QPushButton:hover {{
 
 BADGE_PROCESSED = f"""
 QLabel {{
-    background-color: {ACCENT};
-    color: #000;
+    background-color: {PINK};
+    color: {BG};
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 10px;
@@ -203,8 +250,8 @@ QLabel {{
 
 BADGE_UNPROCESSED = f"""
 QLabel {{
-    background-color: #e74c3c;
-    color: white;
+    background-color: {BORDER};
+    color: {TEXT_MUTED};
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 10px;
@@ -214,8 +261,19 @@ QLabel {{
 
 BADGE_PROCESSING = f"""
 QLabel {{
-    background-color: #f39c12;
-    color: #000;
+    background-color: {PURPLE};
+    color: {TEXT};
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: bold;
+}}
+"""
+
+BADGE_CANCELLED = f"""
+QLabel {{
+    background-color: {BORDER};
+    color: {TEXT_MUTED};
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 10px;
@@ -225,27 +283,27 @@ QLabel {{
 
 SLIDER_STYLE = f"""
 QSlider::groove:horizontal {{
-    background: #0d1525;
+    background: {BG};
     height: 6px;
     border-radius: 3px;
     border: 1px solid {BORDER};
 }}
 QSlider::sub-page:horizontal {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #2fa87e, stop:1 {ACCENT});
+        stop:0 {PURPLE}, stop:1 {PINK});
     border-radius: 3px;
 }}
 QSlider::handle:horizontal {{
-    background: {ACCENT};
+    background: {PURPLE};
     width: 14px;
     height: 14px;
     margin: -5px 0;
     border-radius: 7px;
-    border: 2px solid #2fa87e;
+    border: 2px solid {PINK};
 }}
 QSlider::handle:horizontal:hover {{
-    background: #6fe8c0;
-    border: 2px solid {ACCENT};
+    background: {PINK};
+    border: 2px solid {PURPLE};
 }}
 """
 
@@ -272,6 +330,7 @@ class PreprocessingTab(QWidget):
     def __init__(self, data_manager, parent=None):
         super().__init__(parent)
         self.data_manager = data_manager
+        self.dm = data_manager  # alias used by OpenLocationBar
         self._workers = {}  # session_id -> ProcessingWorker or ExportWorker
         self._card_widgets = {}  # session_id -> dict of widgets in the card
         self._selected_session_id = None  # currently selected video for preview
@@ -282,6 +341,7 @@ class PreprocessingTab(QWidget):
         if self._global_roi:
             self.chk_global_roi.setChecked(True)
         self._populate_models()
+        self._refresh_recent_runs()
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -300,11 +360,32 @@ class PreprocessingTab(QWidget):
         header_row.addWidget(title)
         header_row.addStretch()
 
+        # PRD C12: OpenLocationBar — fast access to relevant folders
+        self.open_bar = OpenLocationBar(self)
+        self.open_bar.add_folder("Videos Folder", lambda: self.dm.videos_dir)
+        self.open_bar.add_folder("Models Folder", self.dm.models_dir)
+        self.open_bar.add_file(
+            "Active Model",
+            lambda: self.dm.models_dir / (self.dm.get_last_model() or "yolov8m.pt"),
+        )
+        self.open_bar.add_folder("Tracks Output", self.dm.tracks_dir)
+        header_row.addWidget(self.open_bar)
+
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setStyleSheet(REFRESH_BTN_STYLE)
         self.btn_refresh.clicked.connect(self.refresh)
         header_row.addWidget(self.btn_refresh)
         layout.addLayout(header_row)
+
+        # --- Preset picker row (D2-8) ---
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(8)
+        presets_path = Path(self.data_manager.config_dir) / "presets.json"
+        self.preset_picker = PresetPicker(presets_path, self)
+        self.preset_picker.preset_loaded.connect(self._on_preset_loaded)
+        preset_row.addWidget(self.preset_picker)
+        preset_row.addStretch()
+        layout.addLayout(preset_row)
 
         # --- Model picker + confidence row ---
         model_row = QHBoxLayout()
@@ -344,6 +425,28 @@ class PreprocessingTab(QWidget):
 
         model_row.addSpacing(20)
 
+        # D2-9: Frame skip spinbox — process every Nth frame
+        model_row.addWidget(QLabel("Process every"))
+        self.skip_spin = QSpinBox()
+        self.skip_spin.setRange(1, 30)
+        self.skip_spin.setValue(self._read_last_frame_skip())
+        self.skip_spin.setSuffix(" frame")
+        self.skip_spin.setFixedWidth(90)
+        self.skip_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {PANEL};
+                color: {TEXT};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 2px 6px;
+            }}
+        """)
+        self.skip_spin.setToolTip("1 = process all frames; higher values speed up processing")
+        self.skip_spin.valueChanged.connect(self._on_frame_skip_changed)
+        model_row.addWidget(self.skip_spin)
+
+        model_row.addSpacing(20)
+
         self.chk_global_roi = QCheckBox("Use Global ROI")
         self.chk_global_roi.setStyleSheet(f"color: {TEXT}; font-size: 12px;")
         self.chk_global_roi.setToolTip("Apply a single ROI to all videos during processing")
@@ -352,6 +455,14 @@ class PreprocessingTab(QWidget):
 
         model_row.addStretch()
         layout.addLayout(model_row)
+
+        # --- Model metadata line (D2-11) ---
+        self.lbl_model_meta = QLabel("")
+        self.lbl_model_meta.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
+        layout.addWidget(self.lbl_model_meta)
+
+        # Hook up provider for preset save
+        self.preset_picker.set_current_provider(self._snapshot_settings)
 
         # --- Stat cards row ---
         stats_row = QHBoxLayout()
@@ -375,6 +486,12 @@ class PreprocessingTab(QWidget):
         self.btn_process_all.clicked.connect(self._process_all_unprocessed)
         proc_row.addWidget(self.btn_process_all)
 
+        self.btn_toggle_recent = QPushButton("Recent Runs ▸")
+        self.btn_toggle_recent.setStyleSheet(SECONDARY_BTN)
+        self.btn_toggle_recent.setCheckable(True)
+        self.btn_toggle_recent.toggled.connect(self._on_toggle_recent_runs)
+        proc_row.addWidget(self.btn_toggle_recent)
+
         layout.addLayout(proc_row)
 
         # --- Scrollable video grid ---
@@ -392,8 +509,8 @@ class PreprocessingTab(QWidget):
 
         # --- Main content: grid on top, ROI preview below ---
         # Use a splitter-like layout: grid gets more space, preview is collapsible
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        center_widget = QWidget()
+        content_layout = QVBoxLayout(center_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(8)
         content_layout.addWidget(scroll, stretch=1)
@@ -459,7 +576,56 @@ class PreprocessingTab(QWidget):
 
         content_layout.addWidget(self.roi_panel)
 
-        layout.addWidget(content_widget, stretch=1)
+        # --- Recent Runs sidebar (D2-10) ---
+        self.recent_panel = QFrame()
+        self.recent_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {PANEL};
+                border: 1px solid {BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        self.recent_panel.setVisible(False)
+        self.recent_panel.setMinimumWidth(260)
+        self.recent_panel.setMaximumWidth(360)
+
+        recent_layout = QVBoxLayout(self.recent_panel)
+        recent_layout.setContentsMargins(12, 10, 12, 10)
+        recent_layout.setSpacing(8)
+
+        recent_title = QLabel("Recent Runs")
+        recent_title.setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT}; border: none;"
+            f" padding-bottom: 4px; border-bottom: 2px solid {PURPLE};"
+        )
+        recent_layout.addWidget(recent_title)
+
+        self.recent_list_widget = QWidget()
+        self.recent_list_layout = QVBoxLayout(self.recent_list_widget)
+        self.recent_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.recent_list_layout.setSpacing(6)
+
+        recent_scroll = QScrollArea()
+        recent_scroll.setWidgetResizable(True)
+        recent_scroll.setFrameShape(QFrame.NoFrame)
+        recent_scroll.setStyleSheet(f"QScrollArea {{ background-color: {PANEL}; border: none; }}")
+        recent_scroll.setWidget(self.recent_list_widget)
+        recent_layout.addWidget(recent_scroll, stretch=1)
+
+        self.lbl_recent_empty = QLabel("No runs yet.")
+        self.lbl_recent_empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none;")
+        self.recent_list_layout.addWidget(self.lbl_recent_empty)
+        self.recent_list_layout.addStretch()
+
+        # Outer horizontal layout: center + sidebar
+        outer_widget = QWidget()
+        outer_layout = QHBoxLayout(outer_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(10)
+        outer_layout.addWidget(center_widget, stretch=1)
+        outer_layout.addWidget(self.recent_panel, stretch=0)
+
+        layout.addWidget(outer_widget, stretch=1)
 
     def _make_stat_card(self, label_text, value_text):
         """Create a stat card widget and return dict with frame, value_label."""
@@ -518,11 +684,15 @@ class PreprocessingTab(QWidget):
             self.model_combo.setCurrentText("yolov8m.pt")
 
         self.model_combo.blockSignals(False)
+        # Update meta label for the current selection (signals were blocked)
+        if hasattr(self, "lbl_model_meta"):
+            self._update_model_metadata(self.model_combo.currentText())
 
     def _on_model_changed(self, model_name):
-        """Save the selected model name to config."""
+        """Save the selected model name to config and refresh metadata."""
         if model_name:
             self.data_manager.set_last_model(model_name)
+        self._update_model_metadata(model_name)
 
     def _browse_model(self):
         """Open a file dialog to select a custom .pt model file."""
@@ -726,7 +896,7 @@ class PreprocessingTab(QWidget):
         if self._current_roi:
             roi_display = dict(self._current_roi)
             roi_display["name"] = "Processing ROI"
-            roi_display["color"] = "#ff6b6b"
+            roi_display["color"] = "#E491C9"
             self.preview_canvas.rois = [roi_display]
         else:
             self.preview_canvas.rois = []
@@ -811,7 +981,7 @@ class PreprocessingTab(QWidget):
         thumb_label.setFixedHeight(160)
         thumb_label.setAlignment(Qt.AlignCenter)
         thumb_label.setStyleSheet(
-            "background-color: #0d1117; border-radius: 8px 8px 0 0; border: none;"
+            "background-color: #15173D; border-radius: 8px 8px 0 0; border: none;"
         )
 
         video_path = self.data_manager.get_video_path(session_id)
@@ -829,13 +999,13 @@ class PreprocessingTab(QWidget):
             else:
                 thumb_label.setText("No Preview")
                 thumb_label.setStyleSheet(
-                    "background-color: #0d1117; border-radius: 8px 8px 0 0;"
+                    "background-color: #15173D; border-radius: 8px 8px 0 0;"
                     " border: none; color: #555; font-size: 14px;"
                 )
         else:
             thumb_label.setText("No Video")
             thumb_label.setStyleSheet(
-                "background-color: #0d1117; border-radius: 8px 8px 0 0;"
+                "background-color: #15173D; border-radius: 8px 8px 0 0;"
                 " border: none; color: #444; font-size: 14px; font-style: italic;"
             )
         vbox.addWidget(thumb_label)
@@ -903,7 +1073,7 @@ class PreprocessingTab(QWidget):
         progress.setVisible(False)
         progress.setStyleSheet(f"""
             QProgressBar {{
-                background-color: #0d1525;
+                background-color: {BG};
                 border: 1px solid {BORDER};
                 border-radius: 8px;
                 text-align: center;
@@ -913,11 +1083,17 @@ class PreprocessingTab(QWidget):
             }}
             QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2fa87e, stop:0.5 {ACCENT}, stop:1 #6fe8c0);
+                    stop:0 {PURPLE}, stop:1 {PINK});
                 border-radius: 7px;
             }}
         """)
         vbox.addWidget(progress)
+
+        # --- ETA / FPS detail label (visible during processing) ---
+        eta_label = QLabel("")
+        eta_label.setStyleSheet(f"color: {PINK}; font-size: 11px; padding: 0 12px;")
+        eta_label.setVisible(False)
+        vbox.addWidget(eta_label)
 
         # --- Action buttons ---
         btn_row = QHBoxLayout()
@@ -932,6 +1108,7 @@ class PreprocessingTab(QWidget):
         )
         btn_row.addWidget(btn_preview)
 
+        btn_cancel = None
         if status == "unprocessed":
             btn_process = QPushButton("Process")
             btn_process.setStyleSheet(ACTION_BTN)
@@ -940,9 +1117,11 @@ class PreprocessingTab(QWidget):
             )
             btn_row.addWidget(btn_process)
         elif status == "processing":
-            btn_cancel = QPushButton("Processing...")
-            btn_cancel.setStyleSheet(ACTION_BTN)
-            btn_cancel.setEnabled(False)
+            btn_cancel = QPushButton("Cancel")
+            btn_cancel.setStyleSheet(CANCEL_BTN)
+            btn_cancel.clicked.connect(
+                lambda checked=False, sid=session_id: self._cancel_processing(sid)
+            )
             btn_row.addWidget(btn_cancel)
         elif status == "processed":
             btn_review = QPushButton("Review")
@@ -962,7 +1141,7 @@ class PreprocessingTab(QWidget):
             btn_reprocess = QPushButton("Reprocess")
             btn_reprocess.setStyleSheet(SECONDARY_BTN)
             btn_reprocess.clicked.connect(
-                lambda checked=False, sid=session_id: self._process_video(sid)
+                lambda checked=False, sid=session_id: self._reprocess_video(sid)
             )
             btn_row.addWidget(btn_reprocess)
 
@@ -974,6 +1153,8 @@ class PreprocessingTab(QWidget):
             "frame": frame,
             "progress": progress,
             "badge": badge,
+            "eta_label": eta_label,
+            "btn_cancel": btn_cancel,
         }
 
         return frame
@@ -994,6 +1175,7 @@ class PreprocessingTab(QWidget):
 
         model = self.model_combo.currentText()
         conf = self.conf_slider.value() / 100.0
+        sample_rate = max(1, int(self.skip_spin.value()))
 
         # Load ROI: global ROI takes precedence when enabled
         if self.chk_global_roi.isChecked() and self._global_roi:
@@ -1011,30 +1193,137 @@ class PreprocessingTab(QWidget):
             session_id=session_id,
             models_dir=str(self.data_manager.models_dir),
             processing_roi=processing_roi,
+            sample_rate=sample_rate,
         )
+        worker._run_params = {
+            "video_path": str(video_path),
+            "video_name": video_path.name,
+            "model": model,
+            "conf": conf,
+            "frame_skip": sample_rate,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "start_time": time.time(),
+        }
         worker.progress.connect(self._on_processing_progress)
+        worker.progress_detail.connect(self._on_processing_progress_detail)
         worker.finished.connect(self._on_processing_finished)
         worker.error.connect(self._on_processing_error)
+        worker.cancelled.connect(self._on_processing_cancelled)
 
         self._workers[session_id] = worker
         worker.start()
 
         # Show progress bar if card exists
         if session_id in self._card_widgets:
-            self._card_widgets[session_id]["progress"].setVisible(True)
-            self._card_widgets[session_id]["progress"].setValue(0)
-            self._card_widgets[session_id]["badge"].setText("Processing")
-            self._card_widgets[session_id]["badge"].setStyleSheet(BADGE_PROCESSING)
+            cw = self._card_widgets[session_id]
+            cw["progress"].setVisible(True)
+            cw["progress"].setValue(0)
+            cw["badge"].setText("Processing")
+            cw["badge"].setStyleSheet(BADGE_PROCESSING)
+            cw["eta_label"].setVisible(True)
+            cw["eta_label"].setText("Starting...")
+
+    def _reprocess_video(self, session_id):
+        """Reprocess prompts the user to overwrite or back up existing tracks."""
+        tracks_file = self.data_manager.tracks_dir / f"{session_id}.json"
+        if tracks_file.exists():
+            box = QMessageBox(self)
+            box.setWindowTitle("Reprocess")
+            box.setText("Overwrite previous tracks?")
+            box.setInformativeText(
+                "A backup keeps a timestamped copy of the existing tracks file."
+            )
+            btn_yes = box.addButton("Overwrite", QMessageBox.YesRole)
+            btn_backup = box.addButton("Save as backup", QMessageBox.ActionRole)
+            btn_cancel = box.addButton("Cancel", QMessageBox.RejectRole)
+            box.setDefaultButton(btn_backup)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is btn_cancel:
+                return
+            if clicked is btn_backup:
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup_path = tracks_file.with_suffix(
+                    tracks_file.suffix + f".bak-{ts}"
+                )
+                try:
+                    shutil.copy2(str(tracks_file), str(backup_path))
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Backup Failed", f"Couldn't write backup:\n{e}"
+                    )
+                    return
+        self._process_video(session_id)
+
+    def _cancel_processing(self, session_id):
+        """User clicked Cancel -- flip the worker's cancel flag."""
+        worker = self._workers.get(session_id)
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+        except Exception:
+            pass
+        if session_id in self._card_widgets:
+            cw = self._card_widgets[session_id]
+            cw["badge"].setText("Cancelling...")
+            cw["badge"].setStyleSheet(BADGE_CANCELLED)
+            if cw.get("btn_cancel") is not None:
+                cw["btn_cancel"].setEnabled(False)
+                cw["btn_cancel"].setText("Cancelling...")
+            cw["eta_label"].setText("Cancelling...")
 
     def _on_processing_progress(self, session_id, percent):
         if session_id in self._card_widgets:
             self._card_widgets[session_id]["progress"].setValue(percent)
 
+    def _on_processing_progress_detail(self, session_id, percent, fps, eta_seconds):
+        if session_id not in self._card_widgets:
+            return
+        cw = self._card_widgets[session_id]
+        cw["progress"].setValue(int(percent))
+        eta_str = _format_eta(eta_seconds)
+        cw["eta_label"].setText(
+            f"{int(percent)}% - {fps:.1f} fps - {eta_str} remaining"
+        )
+
     def _on_processing_finished(self, session_id):
-        self.data_manager.clear_processing_job(session_id)
         worker = self._workers.pop(session_id, None)
+        params = getattr(worker, "_run_params", None) if worker else None
+        self.data_manager.clear_processing_job(session_id)
         if worker:
             worker.wait()
+        # Append to recent runs
+        if params is not None:
+            tracks_found = 0
+            tracks_data = self.data_manager.load_tracks(session_id)
+            if isinstance(tracks_data, dict):
+                tracks_found = len(tracks_data.get("tracks", []))
+            self._append_recent_run({
+                "session_id": session_id,
+                "video_name": params.get("video_name", session_id),
+                "model": params.get("model"),
+                "conf": params.get("conf"),
+                "frame_skip": params.get("frame_skip", 1),
+                "processing_time": round(time.time() - params["start_time"], 2),
+                "tracks_found": tracks_found,
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "status": "done",
+            })
+        self.refresh()
+        self._refresh_recent_runs()
+
+    def _on_processing_cancelled(self, session_id):
+        worker = self._workers.pop(session_id, None)
+        self.data_manager.clear_processing_job(session_id)
+        if worker:
+            worker.wait()
+        if session_id in self._card_widgets:
+            cw = self._card_widgets[session_id]
+            cw["badge"].setText("Cancelled")
+            cw["badge"].setStyleSheet(BADGE_CANCELLED)
+            cw["eta_label"].setVisible(False)
+            cw["progress"].setVisible(False)
         self.refresh()
 
     def _on_processing_error(self, session_id, error_msg):
@@ -1043,16 +1332,22 @@ class PreprocessingTab(QWidget):
         if worker:
             worker.wait()
         self.refresh()
-        display_msg = error_msg
-        if len(display_msg) > 800:
-            lines = display_msg.split('\n')
-            first_line = lines[0]
-            tail = '\n'.join(lines[-10:])
-            display_msg = f"{first_line}\n\n... (truncated) ...\n\n{tail}"
-        QMessageBox.critical(self, "Processing Error", f"Error processing {session_id}:\n\n{display_msg}")
+        # Show only the user-friendly first line; full traceback is in the log.
+        first_line = error_msg.split("\n", 1)[0].strip() if error_msg else ""
+        display_msg = first_line or "Processing failed."
+        if len(display_msg) > 600:
+            display_msg = display_msg[:600] + "..."
+        QMessageBox.critical(
+            self, "Processing Error",
+            f"{display_msg}\n\n(Session: {session_id})",
+        )
 
     def _process_all_unprocessed(self):
-        """Start processing all unprocessed videos."""
+        """Start processing all unprocessed videos.
+
+        Hands jobs to the local processing workers -- same scheduler the
+        single-video Process buttons use.
+        """
         videos = self.data_manager.get_videos()
         unprocessed = [v for v in videos if v["status"] == "unprocessed"]
         if not unprocessed:
@@ -1070,6 +1365,186 @@ class PreprocessingTab(QWidget):
 
         for video in unprocessed:
             self._process_video(video["session_id"])
+
+    # ------------------------------------------------------------------
+    # Presets, frame skip, model metadata, recent runs
+    # ------------------------------------------------------------------
+
+    def _snapshot_settings(self) -> dict:
+        """Return the current model+conf+frame_skip as a preset payload."""
+        return {
+            "model": self.model_combo.currentText(),
+            "conf": self.conf_slider.value() / 100.0,
+            "frame_skip": int(self.skip_spin.value()),
+        }
+
+    def _on_preset_loaded(self, payload: dict) -> None:
+        model = payload.get("model")
+        if model:
+            idx = self.model_combo.findText(model)
+            if idx >= 0:
+                self.model_combo.setCurrentIndex(idx)
+        conf = payload.get("conf")
+        if conf is not None:
+            try:
+                self.conf_slider.setValue(int(float(conf) * 100))
+            except (TypeError, ValueError):
+                pass
+        frame_skip = payload.get("frame_skip")
+        if frame_skip is not None:
+            try:
+                self.skip_spin.setValue(max(1, int(frame_skip)))
+            except (TypeError, ValueError):
+                pass
+
+    def _read_last_frame_skip(self) -> int:
+        config_file = Path(self.data_manager.config_dir) / "model_config.json"
+        try:
+            if config_file.exists():
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+                return max(1, int(data.get("last_frame_skip", 1)))
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            pass
+        return 1
+
+    def _on_frame_skip_changed(self, value: int) -> None:
+        config_file = Path(self.data_manager.config_dir) / "model_config.json"
+        data = {}
+        try:
+            if config_file.exists():
+                with open(config_file, "r") as f:
+                    data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            data = {}
+        data["last_frame_skip"] = int(value)
+        try:
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_file, "w") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def _update_model_metadata(self, model_name: str) -> None:
+        """Update the small grey 'yolov8n.pt - 6.2 MB - ~30 fps' label."""
+        if not model_name:
+            self.lbl_model_meta.setText("")
+            return
+        local = Path(self.data_manager.models_dir) / model_name
+        parts = [model_name]
+        if local.exists():
+            try:
+                size_mb = local.stat().st_size / (1024 * 1024)
+                parts.append(f"{size_mb:.1f} MB")
+            except OSError:
+                pass
+        else:
+            parts.append("download on first use")
+        # Rough CPU fps hints (very approximate)
+        rough_fps = {
+            "yolov8n.pt": "~30 fps on CPU",
+            "yolov8s.pt": "~18 fps on CPU",
+            "yolov8m.pt": "~8 fps on CPU",
+            "yolov8l.pt": "~4 fps on CPU",
+            "yolov8x.pt": "~2 fps on CPU",
+        }
+        if model_name in rough_fps:
+            parts.append(rough_fps[model_name])
+        self.lbl_model_meta.setText(" - ".join(parts))
+
+    # ------------------------------------------------------------------
+    # Recent runs sidebar (D2-10)
+    # ------------------------------------------------------------------
+
+    def _recent_runs_path(self) -> Path:
+        return Path(self.data_manager.config_dir) / "processing_history.json"
+
+    def _read_recent_runs(self) -> list:
+        p = self._recent_runs_path()
+        if not p.exists():
+            return []
+        try:
+            with open(p, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+        return []
+
+    def _append_recent_run(self, entry: dict) -> None:
+        runs = self._read_recent_runs()
+        runs.append(entry)
+        # Keep at most 100 in the file; sidebar shows the last 10
+        runs = runs[-100:]
+        try:
+            p = self._recent_runs_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "w") as f:
+                json.dump(runs, f, indent=2)
+        except OSError:
+            pass
+
+    def _refresh_recent_runs(self) -> None:
+        # Clear existing items
+        while self.recent_list_layout.count():
+            item = self.recent_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        runs = self._read_recent_runs()[-10:][::-1]  # newest first
+        if not runs:
+            empty = QLabel("No runs yet.")
+            empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none;")
+            self.recent_list_layout.addWidget(empty)
+            self.recent_list_layout.addStretch()
+            return
+        for entry in runs:
+            self.recent_list_layout.addWidget(self._make_recent_run_card(entry))
+        self.recent_list_layout.addStretch()
+
+    def _make_recent_run_card(self, entry: dict) -> QWidget:
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+            }}
+        """)
+        vbox = QVBoxLayout(card)
+        vbox.setContentsMargins(8, 6, 8, 6)
+        vbox.setSpacing(2)
+        name = QLabel(entry.get("video_name", entry.get("session_id", "-")))
+        name.setStyleSheet(f"color: {TEXT}; font-weight: bold; font-size: 11px; border: none;")
+        name.setWordWrap(True)
+        vbox.addWidget(name)
+
+        meta_bits = []
+        if entry.get("model"):
+            meta_bits.append(str(entry["model"]))
+        if entry.get("conf") is not None:
+            try:
+                meta_bits.append(f"conf {float(entry['conf']):.2f}")
+            except (TypeError, ValueError):
+                pass
+        fs = entry.get("frame_skip", 1)
+        if fs and int(fs) > 1:
+            meta_bits.append(f"skip {fs}")
+        if entry.get("processing_time"):
+            meta_bits.append(f"{entry['processing_time']}s")
+        if entry.get("tracks_found") is not None:
+            meta_bits.append(f"{entry['tracks_found']} tracks")
+        meta = QLabel(" - ".join(meta_bits))
+        meta.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; border: none;")
+        meta.setWordWrap(True)
+        vbox.addWidget(meta)
+        return card
+
+    def _on_toggle_recent_runs(self, checked: bool) -> None:
+        self.recent_panel.setVisible(checked)
+        self.btn_toggle_recent.setText("Recent Runs <" if checked else "Recent Runs >")
+        if checked:
+            self._refresh_recent_runs()
 
     # ------------------------------------------------------------------
     # Export

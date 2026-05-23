@@ -9,6 +9,14 @@ from PySide6.QtGui import (QPainter, QPixmap, QImage, QPen, QColor, QBrush,
 import cv2
 import numpy as np
 
+from cctv_yolo.theme import (
+    PURPLE as THEME_PURPLE,
+    PINK as THEME_PINK,
+    OFFWHITE as THEME_OFFWHITE,
+    BORDER as THEME_BORDER,
+    INDIGO as THEME_INDIGO,
+)
+
 
 HANDLE_SIZE = 8
 
@@ -23,13 +31,16 @@ HANDLE_CURSORS = {
     'mr': Qt.SizeHorCursor,
 }
 
+# Legacy CLASS_COLORS map (kept so anything that imports it stays working).
+# Canvas overlays now honor the theme palette (PRD C11): purple for default
+# bboxes, pink for selected.
 CLASS_COLORS = {
-    "car": QColor("#3498db"),
-    "truck": QColor("#e74c3c"),
-    "bus": QColor("#9b59b6"),
-    "motorcycle": QColor("#f39c12"),
-    "bicycle": QColor("#1abc9c"),
-    "unknown": QColor("#95a5a6"),
+    "car": QColor(THEME_PURPLE),
+    "truck": QColor(THEME_PURPLE),
+    "bus": QColor(THEME_PURPLE),
+    "motorcycle": QColor(THEME_PURPLE),
+    "bicycle": QColor(THEME_PURPLE),
+    "unknown": QColor(THEME_PURPLE),
 }
 
 
@@ -72,6 +83,10 @@ class VideoCanvas(QWidget):
         self.current_frame = 0
         self.rois = []
         self.dimmed_track_ids = set()  # track IDs to draw at reduced opacity
+        # PRD F3-1: indices of ROIs the user filter-selected in the sidebar.
+        # _paint_rois reads this to apply OFFWHITE focus stroke (selected) and
+        # dim the rest.
+        self.selected_roi_indices = set()
 
         # Drawing state
         self.drawing_mode = "select"  # "select", "draw_box", "roi_rect", "roi_polygon"
@@ -92,7 +107,7 @@ class VideoCanvas(QWidget):
         self._drag_start_video = None    # (vx, vy) start of drag in video coords
         self._drag_preview_bbox = None   # live preview bbox in video coords
 
-        self.setStyleSheet("background-color: #000;")
+        self.setStyleSheet("background-color: #15173D;")
 
     # ------------------------------------------------------------------
     # Video I/O
@@ -360,33 +375,40 @@ class VideoCanvas(QWidget):
             sh = (y2 - y1) * scale_y
 
             class_name = track.get("class", "unknown")
-            color = QColor(CLASS_COLORS.get(class_name, CLASS_COLORS["unknown"]))
             is_selected = track_id == self.selected_track_id
             is_interpolated = frame_data.get("interpolated", False)
             is_occluded = frame_data.get("occluded", False)
 
+            # PRD C11 palette: default = PURPLE 2px, selected = PINK 3px + 15% fill,
+            # interpolated = PURPLE 50% opacity + dashed.
+            if is_selected:
+                color = QColor(THEME_PINK)
+            else:
+                color = QColor(THEME_PURPLE)
+
             # Reduce opacity for dimmed (outside ROI) tracks
             if is_dimmed:
                 color.setAlpha(40)
+            elif is_interpolated and not is_selected:
+                color.setAlpha(128)  # 50% opacity for interpolated frames
 
             # Bounding box outline. Occluded segments use a thicker
-            # dotted pen in pink so they're visually unmistakable.
+            # dotted pink pen so they're visually unmistakable.
             if is_occluded:
-                occluded_color = QColor("#ff64c8")
-                pen = QPen(occluded_color, 4 if is_selected else 3)
+                pen = QPen(QColor(THEME_PINK), 4 if is_selected else 3)
                 pen.setStyle(Qt.DotLine)
             else:
-                pen = QPen(color, 4 if is_selected else 2)
+                pen = QPen(color, 3 if is_selected else 2)
                 if is_interpolated:
                     pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(QRectF(sx1, sy1, sw, sh))
 
-            # Semi-transparent fill for selected track
+            # Selected track gets a 15% PINK fill (PRD C11)
             if is_selected and not is_dimmed:
-                fill_color = QColor(color)
-                fill_color.setAlpha(50)
+                fill_color = QColor(THEME_PINK)
+                fill_color.setAlpha(38)  # ~15%
                 painter.fillRect(QRectF(sx1, sy1, sw, sh), fill_color)
 
             # Label above the box
@@ -404,14 +426,44 @@ class VideoCanvas(QWidget):
                 if is_interpolated:
                     label_bg.setAlpha(170)
                 painter.fillRect(QRectF(sx1, sy1 - text_h, text_w, text_h), label_bg)
-                painter.setPen(QColor("#000"))
+                painter.setPen(QColor("#15173D"))
                 painter.drawText(QPointF(sx1 + 4, sy1 - 4), label)
 
     def _paint_rois(self, painter, fm, text_h):
-        """Draw all ROI overlays (rect and polygon)."""
-        for roi in self.rois:
-            roi_color = QColor(roi.get("color", "#ff6b6b"))
-            pen = QPen(roi_color, 2, Qt.DashLine)
+        """Draw all ROI overlays (rect and polygon).
+
+        PRD C11 / F3-1 theming:
+        - default ROI: PINK 2px stroke, 12% fill
+        - filter-selected ROI: OFFWHITE 3px stroke, 12% PINK fill
+        - other ROIs while one is filter-selected: BORDER stroke 1px, 6% fill
+        """
+        # Compute which ROIs (by index) are filter-selected
+        selected_indices: set = getattr(self, "selected_roi_indices", set()) or set()
+        any_selected = bool(selected_indices)
+
+        for idx, roi in enumerate(self.rois):
+            is_selected = idx in selected_indices
+            is_dimmed = any_selected and not is_selected
+
+            base_color = QColor(roi.get("color", THEME_PINK))
+
+            if is_selected:
+                stroke = QColor(THEME_OFFWHITE)
+                fill = QColor(THEME_PINK)
+                fill.setAlpha(31)  # 12%
+                pen = QPen(stroke, 3, Qt.SolidLine)
+            elif is_dimmed:
+                stroke = QColor(THEME_BORDER)
+                fill = QColor(THEME_BORDER)
+                fill.setAlpha(15)  # 6%
+                pen = QPen(stroke, 1, Qt.DashLine)
+            else:
+                stroke = base_color
+                fill = QColor(base_color)
+                fill.setAlpha(31)  # 12%
+                pen = QPen(stroke, 2, Qt.DashLine)
+
+            roi_color = stroke
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
 
@@ -432,7 +484,7 @@ class VideoCanvas(QWidget):
                 label_bg = QColor(roi_color)
                 label_bg.setAlpha(200)
                 painter.fillRect(QRectF(cx1, cy1 - text_h, tw, text_h), label_bg)
-                painter.setPen(QColor("#000"))
+                painter.setPen(QColor("#15173D"))
                 painter.drawText(QPointF(cx1 + 4, cy1 - 4), name)
                 painter.setPen(pen)
 
@@ -456,7 +508,7 @@ class VideoCanvas(QWidget):
                 label_bg = QColor(roi_color)
                 label_bg.setAlpha(200)
                 painter.fillRect(QRectF(first_cx, first_cy - text_h, tw, text_h), label_bg)
-                painter.setPen(QColor("#000"))
+                painter.setPen(QColor("#15173D"))
                 painter.drawText(QPointF(first_cx + 4, first_cy - 4), name)
                 painter.setPen(pen)
 
@@ -496,7 +548,7 @@ class VideoCanvas(QWidget):
             sy1 = dr.y() + bbox[1] * scale_y
             sw = (bbox[2] - bbox[0]) * scale_x
             sh = (bbox[3] - bbox[1]) * scale_y
-            pen = QPen(QColor("#ffffff"), 2, Qt.DashLine)
+            pen = QPen(QColor(THEME_OFFWHITE), 2, Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(QRectF(sx1, sy1, sw, sh))
@@ -506,8 +558,8 @@ class VideoCanvas(QWidget):
         if not handles:
             return
         for key, rect in handles.items():
-            painter.setPen(QPen(QColor("#000000"), 1))
-            painter.setBrush(QBrush(QColor("#ffffff")))
+            painter.setPen(QPen(QColor(THEME_INDIGO), 1))
+            painter.setBrush(QBrush(QColor(THEME_OFFWHITE)))
             painter.drawRect(rect)
 
     # ------------------------------------------------------------------
@@ -684,9 +736,16 @@ class VideoCanvas(QWidget):
                 if self.drawing_mode == "draw_box":
                     self.box_drawn.emit([vx1, vy1, vx2, vy2])
                 elif self.drawing_mode == "roi_rect":
+                    # Clamp to frame bounds so ROI never falls outside the video.
+                    vw = max(self._video_width - 1, 0)
+                    vh = max(self._video_height - 1, 0)
+                    cx1 = max(0, min(vx1, vw))
+                    cy1 = max(0, min(vy1, vh))
+                    cx2 = max(0, min(vx2, vw))
+                    cy2 = max(0, min(vy2, vh))
                     self.roi_rect_drawn.emit(
-                        {"x": vx1, "y": vy1},
-                        {"x": vx2, "y": vy2})
+                        {"x": cx1, "y": cy1},
+                        {"x": cx2, "y": cy2})
 
             self._draw_start = None
             self._draw_end = None
@@ -702,10 +761,14 @@ class VideoCanvas(QWidget):
                 if abs(last[0] - prev[0]) < 5 and abs(last[1] - prev[1]) < 5:
                     self._polygon_points.pop()
 
-            # Convert canvas coords to video coords
+            # Convert canvas coords to video coords (clamped to frame bounds)
+            vw = max(self._video_width - 1, 0)
+            vh = max(self._video_height - 1, 0)
             video_points = []
             for cx, cy in self._polygon_points:
                 vx, vy = self._canvas_to_video(cx, cy)
+                vx = max(0, min(vx, vw))
+                vy = max(0, min(vy, vh))
                 video_points.append({"x": vx, "y": vy})
 
             self.roi_polygon_drawn.emit(video_points)

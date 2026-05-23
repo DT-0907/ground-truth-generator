@@ -22,18 +22,19 @@ from PySide6.QtWidgets import (
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
 )
+from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 
 CARD_STYLE_REVIEW = f"""
 QFrame {{
     background-color: {PANEL};
     border: 1px solid {BORDER};
-    border-left: 3px solid #e67e22;
+    border-left: 3px solid #F1C56B;
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1b2844;
-    border: 1px solid #3d4e73;
-    border-left: 3px solid #e67e22;
+    background-color: #1E2050;
+    border: 1px solid #2D2F60;
+    border-left: 3px solid #F1C56B;
 }}
 """
 
@@ -45,8 +46,8 @@ QFrame {{
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1b2844;
-    border: 1px solid #3d4e73;
+    background-color: #1E2050;
+    border: 1px solid #2D2F60;
     border-left: 3px solid {ACCENT};
 }}
 """
@@ -59,8 +60,8 @@ QFrame {{
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1b2844;
-    border: 1px solid #3d4e73;
+    background-color: #1E2050;
+    border: 1px solid #2D2F60;
     border-left: 3px solid {BORDER};
 }}
 """
@@ -68,7 +69,7 @@ QFrame:hover {{
 STAT_CARD_STYLE = f"""
 QFrame {{
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b2844, stop:1 {PANEL});
+        stop:0 #1E2050, stop:1 {PANEL});
     border: 1px solid {BORDER};
     border-top: 2px solid {ACCENT};
     border-radius: 8px;
@@ -78,7 +79,7 @@ QFrame {{
 
 BADGE_REVIEW = f"""
 QLabel {{
-    background-color: #e74c3c;
+    background-color: #FF6B7A;
     color: white;
     border-radius: 4px;
     padding: 2px 8px;
@@ -90,7 +91,7 @@ QLabel {{
 BADGE_CORRECTED = f"""
 QLabel {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 11px;
@@ -100,7 +101,7 @@ QLabel {{
 
 BADGE_MISSING = f"""
 QLabel {{
-    background-color: #95a5a6;
+    background-color: #A89BA8;
     color: white;
     border-radius: 4px;
     padding: 2px 8px;
@@ -112,7 +113,7 @@ QLabel {{
 REVIEW_BTN_STYLE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 6px 16px;
@@ -120,10 +121,10 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: #E491C9;
 }}
 QPushButton:pressed {{
-    background-color: #2fa87e;
+    background-color: #E491C9;
 }}
 """
 
@@ -144,7 +145,7 @@ QPushButton:hover {{
 FILTER_BTN_ACTIVE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 5px 14px;
@@ -152,7 +153,7 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: #E491C9;
 }}
 """
 
@@ -172,8 +173,8 @@ QPushButton:hover {{
 
 NEXT_REVIEW_BTN = f"""
 QPushButton {{
-    background-color: #e67e22;
-    color: #000;
+    background-color: #F1C56B;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 6px 16px;
@@ -181,11 +182,11 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #d35400;
+    background-color: #F1C56B;
 }}
 QPushButton:disabled {{
     background-color: {BORDER};
-    color: #666;
+    color: #A89BA8;
 }}
 """
 
@@ -227,6 +228,23 @@ class CorrectionTab(QWidget):
         self.btn_refresh.setStyleSheet(REFRESH_BTN_STYLE)
         self.btn_refresh.clicked.connect(self.refresh)
         header_row.addWidget(self.btn_refresh)
+
+        # OpenLocationBar (PRD C12) — quick jumps to the on-disk locations
+        # this tab cares about. Tooltip shows the resolved path.
+        self.open_bar = OpenLocationBar(self)
+        self.open_bar.add_folder(
+            "Corrections",
+            lambda: self.data_manager.corrections_dir,
+        )
+        self.open_bar.add_folder(
+            "Tracks",
+            lambda: self.data_manager.tracks_dir,
+        )
+        self.open_bar.add_folder(
+            "Exports",
+            lambda: self.data_manager.exports_dir,
+        )
+        header_row.addWidget(self.open_bar)
         layout.addLayout(header_row)
 
         # --- Stat cards row ---
@@ -291,7 +309,7 @@ class CorrectionTab(QWidget):
         vbox.setContentsMargins(16, 12, 16, 12)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #aabbcc; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
+        lbl.setStyleSheet("color: #A89BA8; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
         lbl.setAlignment(Qt.AlignLeft)
 
         val = QLabel(value_text)

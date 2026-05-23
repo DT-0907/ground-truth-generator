@@ -34,15 +34,15 @@ from cctv_yolo.theme import (
 ACTION_BTN = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 6px 14px;
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #3bbb91; }}
-QPushButton:disabled {{ background-color: {BORDER}; color: #666; }}
+QPushButton:hover {{ background-color: #E491C9; }}
+QPushButton:disabled {{ background-color: {BORDER}; color: #A89BA8; }}
 """
 
 

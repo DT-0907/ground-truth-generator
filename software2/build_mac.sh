@@ -3,6 +3,15 @@
 #  Build CCTV-YOLO v2 (Native) for macOS
 #  Output: dist/CCTV-YOLO.dmg
 # ============================================================
+#
+# NOTE: this script must run under the SAME Python architecture you want
+# the app to ship in. On Apple Silicon, use `arch -arm64 /opt/homebrew/bin/python3`
+# (or your installed python may secretly be x86_64 via Rosetta, which produces
+# a wrong-arch bundle that crashes on first launch).
+# Check with:
+#     python3 -c "import platform; print(platform.machine())"
+# arm64 = native Apple Silicon, x86_64 = Intel/Rosetta.
+#
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -13,9 +13,11 @@ Method
 PNG render uses pure OpenCV so we don't need matplotlib.
 """
 from __future__ import annotations
+import json
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 import cv2
 import numpy as np
@@ -24,6 +26,38 @@ from PySide6.QtCore import QThread, Signal
 
 
 VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 1: "bicycle"}
+
+
+# ---------------------------------------------------------------------------
+# Colormap — PRD C11. We replace OpenCV's COLORMAP_VIRIDIS with a 3-stop
+# INDIGO → PURPLE → PINK ramp so the matrix art harmonises with the rest of
+# the tab. Stop colors are pulled from cctv_yolo.theme.
+# ---------------------------------------------------------------------------
+
+def _hex_to_bgr(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (b, g, r)
+
+
+def _theme_colormap_bgr(t: float) -> tuple[int, int, int]:
+    """t in [0, 1] → BGR. INDIGO → PURPLE → PINK."""
+    from cctv_yolo.theme import INDIGO, PURPLE, PINK
+    c0 = _hex_to_bgr(INDIGO)
+    c1 = _hex_to_bgr(PURPLE)
+    c2 = _hex_to_bgr(PINK)
+    t = max(0.0, min(1.0, float(t)))
+    if t <= 0.5:
+        k = t / 0.5
+        a, b = c0, c1
+    else:
+        k = (t - 0.5) / 0.5
+        a, b = c1, c2
+    return (
+        int(a[0] + (b[0] - a[0]) * k),
+        int(a[1] + (b[1] - a[1]) * k),
+        int(a[2] + (b[2] - a[2]) * k),
+    )
 
 
 def _device():
@@ -195,7 +229,8 @@ def render_confusion_png(eval_result: dict, output_path: Path) -> Path:
                 (margin, 28),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (240, 240, 240), 2, cv2.LINE_AA)
 
-    # Color cells by normalized count
+    # Color cells by normalized count — uses theme colormap (PRD C11):
+    # INDIGO -> PURPLE -> PINK gradient instead of OpenCV's default.
     max_v = max(1, int(cm.max()))
     for r in range(n):
         for c in range(n):
@@ -203,11 +238,7 @@ def render_confusion_png(eval_result: dict, output_path: Path) -> Path:
             y = title_h + label_top + r * cell
             v = cm[r, c]
             t = v / max_v
-            color = (
-                int(20 + 100 * (1 - t)),
-                int(40 + 80 * t),
-                int(40 + 200 * t),
-            )
+            color = _theme_colormap_bgr(t)
             cv2.rectangle(img, (x, y), (x + cell - 2, y + cell - 2), color, -1)
             text = str(int(v))
             (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
@@ -230,6 +261,91 @@ def render_confusion_png(eval_result: dict, output_path: Path) -> Path:
 
     cv2.imwrite(str(output_path), img)
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Save / load — PRD I3 (history dropdowns in every sub-tab)
+# ---------------------------------------------------------------------------
+
+def save_confusion(result: dict, out_dir: Path, ts: Optional[str] = None) -> tuple[Path, Path]:
+    """Persist a confusion result + its rendered PNG to ``out_dir``.
+
+    Returns ``(json_path, png_path)``.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = ts or datetime.now().strftime("%Y%m%d_%H%M%S")
+    json_path = out_dir / f"confusion_{ts}.json"
+    png_path = out_dir / f"confusion_{ts}.png"
+    payload = dict(result)
+    payload.setdefault("saved_at", datetime.now().isoformat())
+    with open(json_path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    render_confusion_png(result, png_path)
+    return json_path, png_path
+
+
+def load_confusion(path: Path) -> dict:
+    """Load a saved confusion result."""
+    with open(Path(path), "r") as f:
+        return json.load(f)
+
+
+def list_confusion_history(folder: Path) -> list[Path]:
+    """Return saved confusion runs under ``folder`` (newest first)."""
+    p = Path(folder)
+    if not p.exists():
+        return []
+    return sorted(p.glob("confusion_*.json"), reverse=True)
+
+
+def aggregate_results(results: Iterable[dict]) -> dict:
+    """Sum cells across multiple :func:`evaluate` results.
+
+    Used by the Group / Multi sub-tabs in Insights — adds per-session matrices
+    cell-wise then recomputes precision/recall/F1.
+    """
+    results = list(results)
+    if not results:
+        return {"axis": ["background"], "confusion": [[0]], "metrics": {}}
+
+    axis_set: set[str] = set()
+    for r in results:
+        axis_set.update(r.get("axis", []))
+    if "background" in axis_set:
+        axis_set.discard("background")
+    classes = sorted(axis_set)
+    axis = list(classes) + ["background"]
+    idx_of = {c: i for i, c in enumerate(axis)}
+
+    n = len(axis)
+    cm = np.zeros((n, n), dtype=np.int64)
+    for r in results:
+        r_axis = r.get("axis", [])
+        r_cm = np.array(r.get("confusion", []), dtype=np.int64)
+        if r_cm.size == 0:
+            continue
+        for ri, gt_cls in enumerate(r_axis):
+            for ci, pr_cls in enumerate(r_axis):
+                if gt_cls in idx_of and pr_cls in idx_of:
+                    cm[idx_of[gt_cls], idx_of[pr_cls]] += int(r_cm[ri, ci])
+
+    metrics: dict[str, dict] = {}
+    for cls in classes:
+        i = idx_of[cls]
+        tp = int(cm[i, i])
+        fp = int(cm[:, i].sum() - tp)
+        fn = int(cm[i, :].sum() - tp)
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        metrics[cls] = {
+            "tp": tp, "fp": fp, "fn": fn,
+            "precision": round(prec, 3),
+            "recall": round(rec, 3),
+            "f1": round(f1, 3),
+        }
+    return {"axis": axis, "confusion": cm.tolist(), "metrics": metrics}
 
 
 # ---------------------------------------------------------------------------

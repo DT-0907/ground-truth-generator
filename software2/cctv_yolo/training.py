@@ -31,8 +31,35 @@ import cv2
 from PySide6.QtCore import QObject, QThread, Signal
 
 
-# COCO class id -> YOLO class index (we re-index our own training set)
+# Fallback class order used when nothing has been corrected yet.
 _COMMON_CLASSES = ["car", "truck", "bus", "motorcycle", "bicycle"]
+
+
+def discover_classes(data_manager) -> list[str]:
+    """PRD J9-1 — return the union of class names seen across every
+    correction (falls back to ``_COMMON_CLASSES`` if none exist)."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for c in _COMMON_CLASSES:
+        if c not in seen:
+            found.append(c)
+            seen.add(c)
+    try:
+        sessions = data_manager.get_sessions()
+    except Exception:
+        return found
+    for s in sessions:
+        if not s.get("has_corrections"):
+            continue
+        data = data_manager.load_corrections(s["id"])
+        if not data:
+            continue
+        for tr in data.get("tracks", []):
+            cls = (tr.get("class") or "vehicle").strip()
+            if cls and cls not in seen:
+                found.append(cls)
+                seen.add(cls)
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +144,7 @@ def build_yolo_dataset(
     val_split: float = 0.1,
     progress_callback=None,
     restrict_session_ids: list[str] | None = None,
+    roi: dict | None = None,
 ) -> dict:
     """Walk every session that has corrections, sample frames, write
     YOLO-formatted training data.
@@ -137,9 +165,10 @@ def build_yolo_dataset(
     for d in [images_train, images_val, labels_train, labels_val]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Discover classes across all sessions first so the index is stable
+    # PRD J9-1 — discover classes dynamically across every correction, so
+    # the index stays stable as new classes appear.
     class_index: dict[str, int] = {}
-    for c in _COMMON_CLASSES:
+    for c in discover_classes(data_manager):
         class_index[c] = len(class_index)
 
     sessions = data_manager.get_sessions()
@@ -165,6 +194,15 @@ def build_yolo_dataset(
 
         # Index detections by frame
         per_frame: dict[int, list[tuple[int, list[float]]]] = defaultdict(list)
+        # PRD J8 — optional ROI filter: only keep detections whose bbox
+        # center falls inside the ROI.
+        if roi is not None:
+            try:
+                from cctv_yolo.processor import _bbox_center_in_roi
+            except Exception:
+                _bbox_center_in_roi = None
+        else:
+            _bbox_center_in_roi = None
         for tr in data.get("tracks", []):
             cls = tr.get("class") or "vehicle"
             if cls not in class_index:
@@ -173,7 +211,11 @@ def build_yolo_dataset(
             for fd in tr.get("frames", []):
                 if fd.get("interpolated"):
                     continue
-                per_frame[fd["frame"]].append((cls_idx, fd["bbox"]))
+                bbox = fd["bbox"]
+                if roi is not None and _bbox_center_in_roi is not None:
+                    if not _bbox_center_in_roi(bbox, roi):
+                        continue
+                per_frame[fd["frame"]].append((cls_idx, bbox))
 
         if not per_frame:
             continue
@@ -289,6 +331,51 @@ class TrainingWorker(QThread):
             except Exception:
                 pass
 
+    def _collect_meta(self, src: Path, dest: Path, stamp: str) -> dict:
+        """Assemble provenance metadata for the trained model.
+
+        Pulls ``best_val_map`` out of the Ultralytics results CSV when
+        available (sibling of best.pt under ``runs/<name>/``).
+        """
+        dataset_root = Path(self.data_yaml).parent
+        # The dataset folder name is also the build_id used by training_tab.
+        dataset_id = dataset_root.name
+
+        best_val_map: float | None = None
+        try:
+            results_csv = src.parent.parent / "results.csv"  # ../weights/best.pt → ../results.csv
+            if results_csv.exists():
+                lines = results_csv.read_text().strip().splitlines()
+                if len(lines) >= 2:
+                    headers = [h.strip() for h in lines[0].split(",")]
+                    # Prefer mAP50-95 over mAP50 if both exist
+                    for key in ("metrics/mAP50-95(B)", "metrics/mAP50(B)",
+                                "metrics/mAP50-95", "metrics/mAP50"):
+                        if key in headers:
+                            col = headers.index(key)
+                            # Take the last (final-epoch) row
+                            last = [c.strip() for c in lines[-1].split(",")]
+                            if col < len(last):
+                                try:
+                                    best_val_map = round(float(last[col]), 4)
+                                except ValueError:
+                                    pass
+                            break
+        except Exception:
+            pass
+
+        return {
+            "base_model": self.base_model,
+            "epochs": self.epochs,
+            "imgsz": self.imgsz,
+            "batch": self.batch,
+            "dataset_id": dataset_id,
+            "build_id": dataset_id,
+            "run_name": self.run_name,
+            "trained_at": dt.datetime.now().isoformat(timespec="seconds"),
+            "best_val_map": best_val_map,
+        }
+
     def run(self):
         try:
             cmd = [
@@ -366,6 +453,19 @@ class TrainingWorker(QThread):
             dest = self.models_dir / f"trained_{stamp}.pt"
             shutil.copy2(src, dest)
             self.log_line.emit(f"Saved trained model: {dest}")
+
+            # PRD K2-4 — write sidecar provenance JSON so the Models tab can
+            # surface base_model / epochs / dataset_id / best_val_map etc.
+            try:
+                meta = self._collect_meta(src, dest, stamp)
+                meta_path = dest.with_suffix(".meta.json")
+                with open(meta_path, "w") as f:
+                    json.dump(meta, f, indent=2)
+                self.log_line.emit(f"Wrote sidecar metadata: {meta_path.name}")
+            except Exception as e:
+                # Sidecar failure shouldn't block the model from being usable
+                self.log_line.emit(f"Warning: couldn't write sidecar meta: {e}")
+
             self.finished_ok.emit(str(dest))
         except Exception as e:
             import traceback
@@ -383,12 +483,14 @@ class DatasetBuildWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, data_manager, output_root: Path,
-                 sample_every_n: int = 5, val_split: float = 0.1, parent=None):
+                 sample_every_n: int = 5, val_split: float = 0.1,
+                 roi: dict | None = None, parent=None):
         super().__init__(parent)
         self.dm = data_manager
         self.output_root = output_root
         self.sample_every_n = sample_every_n
         self.val_split = val_split
+        self.roi = roi
         # PRD J2: set by training_tab._build_dataset(restrict_to=...) before .start()
         self._restrict_session_ids: list[str] | None = None
 
@@ -401,8 +503,156 @@ class DatasetBuildWorker(QThread):
                 val_split=self.val_split,
                 progress_callback=lambda p: self.progress.emit(p),
                 restrict_session_ids=self._restrict_session_ids,
+                roi=self.roi,
             )
+            # PRD J4b — write a manifest so combined datasets and ROI builds
+            # are self-describing on disk.
+            try:
+                manifest = {
+                    "build_type": "single",
+                    "built_at": dt.datetime.now().isoformat(),
+                    "sample_every_n": self.sample_every_n,
+                    "val_split": self.val_split,
+                    "roi": self.roi,
+                    "class_names": stats.get("classes", []),
+                    "image_counts": {"total": stats.get("images", 0)},
+                    "source_sessions": self._restrict_session_ids or "all_corrected",
+                }
+                (Path(self.output_root) / "manifest.json").write_text(
+                    json.dumps(manifest, indent=2)
+                )
+            except OSError:
+                pass
             self.finished_ok.emit(stats)
         except Exception as e:
             import traceback
             self.failed.emit(f"{e}\n{traceback.format_exc()}")
+
+
+# ---------------------------------------------------------------------------
+# PRD J4b — combine existing datasets
+# ---------------------------------------------------------------------------
+
+def combine_datasets(
+    parent_dataset_paths: list[Path],
+    output_path: Path,
+    val_split: float = 0.1,
+) -> Path:
+    """Merge multiple YOLO datasets into one.
+
+    * Hardlinks files on POSIX, falls back to copy on Windows or cross-device.
+    * Re-indexes class IDs into the union class list, rewriting label files.
+    * On filename collisions across parents, files are prefixed by parent id.
+    * Writes ``manifest.json`` and a unified ``data.yaml``.
+    """
+    output_path = Path(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    images_train = output_path / "images" / "train"
+    images_val = output_path / "images" / "val"
+    labels_train = output_path / "labels" / "train"
+    labels_val = output_path / "labels" / "val"
+    for d in [images_train, images_val, labels_train, labels_val]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    parents = [Path(p) for p in parent_dataset_paths]
+
+    # 1) Build the union class list & per-parent remap.
+    union: list[str] = []
+    seen: set[str] = set()
+    parent_classes: dict[str, list[str]] = {}
+    for p in parents:
+        from cctv_yolo.training_history import dataset_summary
+        info = dataset_summary(p)
+        parent_classes[p.name] = info["classes"]
+        for c in info["classes"]:
+            if c not in seen:
+                union.append(c)
+                seen.add(c)
+    if not union:
+        union = list(_COMMON_CLASSES)
+
+    class_remap: dict[str, dict[int, int]] = {}
+    for parent_name, classes in parent_classes.items():
+        class_remap[parent_name] = {old: union.index(c) for old, c in enumerate(classes) if c in union}
+
+    # 2) Walk each parent and stage images + remapped labels.
+    used_names: set[str] = set()
+    image_counts = {"train": 0, "val": 0}
+
+    def _link_or_copy(src: Path, dest: Path) -> None:
+        if dest.exists():
+            return
+        try:
+            os.link(src, dest)
+        except (OSError, NotImplementedError):
+            shutil.copy2(src, dest)
+
+    source_sessions: set[str] = set()
+
+    for parent in parents:
+        remap = class_remap.get(parent.name, {})
+        for split in ("train", "val"):
+            src_img = parent / "images" / split
+            src_lbl = parent / "labels" / split
+            if not src_img.exists():
+                continue
+            dest_img = images_train if split == "train" else images_val
+            dest_lbl = labels_train if split == "train" else labels_val
+            for img in src_img.iterdir():
+                if img.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+                    continue
+                name = img.name
+                if name in used_names:
+                    name = f"{parent.name}__{name}"
+                used_names.add(name)
+                # Track session ID (everything before "_f<frame>")
+                stem = img.stem
+                m = re.match(r"(.+)_f\d+$", stem)
+                if m:
+                    source_sessions.add(m.group(1))
+                _link_or_copy(img, dest_img / name)
+                # Rewrite label with remapped class indices.
+                lbl_src = src_lbl / (img.stem + ".txt")
+                if lbl_src.exists():
+                    new_stem = Path(name).stem
+                    out_lbl = dest_lbl / (new_stem + ".txt")
+                    try:
+                        lines = []
+                        for raw in lbl_src.read_text().splitlines():
+                            parts = raw.strip().split()
+                            if len(parts) < 5:
+                                continue
+                            try:
+                                old_idx = int(parts[0])
+                            except ValueError:
+                                continue
+                            new_idx = remap.get(old_idx, old_idx)
+                            lines.append(" ".join([str(new_idx)] + parts[1:]))
+                        out_lbl.write_text("\n".join(lines) + ("\n" if lines else ""))
+                    except OSError:
+                        pass
+                image_counts[split] += 1
+
+    # 3) Write data.yaml (union classes).
+    yaml_path = output_path / "data.yaml"
+    with open(yaml_path, "w") as f:
+        f.write(f"path: {output_path.resolve()}\n")
+        f.write("train: images/train\n")
+        f.write("val: images/val\n")
+        f.write(f"nc: {len(union)}\n")
+        f.write("names: [" + ", ".join(f"'{c}'" for c in union) + "]\n")
+
+    # 4) Manifest.
+    manifest = {
+        "build_type": "combined",
+        "built_at": dt.datetime.now().isoformat(),
+        "parents": [p.name for p in parents],
+        "class_names": union,
+        "class_remap": {k: {str(o): n for o, n in v.items()} for k, v in class_remap.items()},
+        "image_counts": image_counts,
+        "source_sessions": sorted(source_sessions),
+        "val_split": val_split,
+    }
+    (output_path / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    return output_path

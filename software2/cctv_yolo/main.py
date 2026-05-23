@@ -355,6 +355,19 @@ def main():
     window = MainWindow(dm)
     window.show()
 
+    # PRD C7 — first-run wizard. Only fires when the marker file is absent.
+    try:
+        from cctv_yolo.first_run import is_first_run, FirstRunWizard
+        if is_first_run():
+            wiz = FirstRunWizard(dm, parent=window)
+            # Modal QWizard event loop.
+            getattr(wiz, "exec")()
+    except Exception:
+        # The wizard is best-effort. If it can't open (e.g. headless),
+        # don't let it block the rest of the app from launching.
+        import logging
+        logging.getLogger(__name__).exception("First-run wizard failed")
+
     sys.exit(app.exec())
 
 

@@ -1,67 +1,140 @@
 """
-Batch tab — folder-wide ingest, persistent queue, watch folder, priority/scheduling.
-"""
-from datetime import datetime
-from pathlib import Path
+Batch tab — folder-scoped tree view + parallel scheduler.
 
-from PySide6.QtCore import Qt, Signal
+PRD Part E. The UI is built around one source folder at a time: you point it
+at any folder on disk, get a ``QTreeView`` (lazy QFileSystemModel) of every
+video in it, and the scheduler chews through them in parallel using a
+``QThreadPool`` you can size on the fly.
+
+Per-folder UI state (active folder + expanded nodes) is persisted in
+``config/batch_registry.json``. Every batch session_id is also recorded in
+``config/batch_session_map.json`` so DataManager can find the underlying
+video regardless of where it lives on disk.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QComboBox,
-    QFileDialog,
     QMessageBox,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QGroupBox,
+    QPushButton,
     QSpinBox,
-    QDoubleSpinBox,
-    QCheckBox,
-    QLineEdit,
-    QProgressBar,
+    QVBoxLayout,
+    QWidget,
 )
 
-from cctv_yolo.batch_queue import BatchQueueManager
-
-# Style constants (match the rest of the app)
+from cctv_yolo.batch_queue import BatchQueueManager, VIDEO_EXTS
+from cctv_yolo.batch_tree import BatchTree
 from cctv_yolo.theme import (
-    INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    BORDER,
+    ERROR,
+    INDIGO,
+    OFFWHITE,
+    PANEL,
+    PANEL_HI,
+    PINK,
+    PURPLE,
+    RADIUS,
+    TEXT_MUTED,
+    TYPE_HINT,
+    TYPE_SECTION,
+    TYPE_TITLE,
 )
+from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 
-ACTION_BTN = f"""
+
+# ---------------------------------------------------------------------------
+# Stylesheets (all colors sourced from theme.py)
+# ---------------------------------------------------------------------------
+
+PRIMARY_BTN = f"""
 QPushButton {{
-    background-color: {ACCENT};
-    color: #000;
+    background-color: {PURPLE};
+    color: {OFFWHITE};
     border: none;
-    border-radius: 4px;
-    padding: 6px 14px;
-    font-weight: bold;
+    border-radius: {RADIUS}px;
+    padding: 7px 16px;
+    font-weight: 600;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #3bbb91; }}
-QPushButton:disabled {{ background-color: {BORDER}; color: #666; }}
+QPushButton:hover {{ background-color: {PINK}; color: {INDIGO}; }}
+QPushButton:disabled {{ background-color: {BORDER}; color: {TEXT_MUTED}; }}
+"""
+
+GHOST_BTN = f"""
+QPushButton {{
+    background-color: transparent;
+    color: {OFFWHITE};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+    padding: 6px 14px;
+    font-weight: 500;
+    font-size: 12px;
+}}
+QPushButton:hover {{ border-color: {PINK}; color: {PINK}; }}
+QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}
 """
 
 DANGER_BTN = f"""
 QPushButton {{
-    background-color: #c0392b;
-    color: white;
-    border: none;
-    border-radius: 4px;
+    background-color: transparent;
+    color: {ERROR};
+    border: 1px solid {ERROR};
+    border-radius: {RADIUS}px;
     padding: 6px 14px;
-    font-weight: bold;
+    font-weight: 600;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #a82a1f; }}
+QPushButton:hover {{ background-color: {ERROR}; color: {OFFWHITE}; }}
+QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}
+"""
+
+PANEL_QSS = f"""
+QFrame#card {{
+    background-color: {PANEL};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+}}
+QLabel {{ color: {OFFWHITE}; }}
+QLabel#hint {{ color: {TEXT_MUTED}; font-size: {TYPE_HINT}px; }}
+QSpinBox, QDoubleSpinBox, QComboBox {{
+    background-color: {INDIGO};
+    color: {OFFWHITE};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS - 2}px;
+    padding: 3px 6px;
+    min-height: 24px;
+}}
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+    border-color: {PINK};
+}}
+QComboBox::drop-down {{ border: 0; width: 18px; }}
+QComboBox QAbstractItemView {{
+    background-color: {PANEL_HI};
+    color: {OFFWHITE};
+    border: 1px solid {BORDER};
+    selection-background-color: {PURPLE};
+}}
+QCheckBox {{ color: {OFFWHITE}; }}
 """
 
 
+# ---------------------------------------------------------------------------
+# BatchTab
+# ---------------------------------------------------------------------------
+
 class BatchTab(QWidget):
-    """Persistent batch-processing queue with watch folder support."""
+    """Tree-driven batch processor with parallel workers and per-folder state."""
 
     review_requested = Signal(str)
 
@@ -69,137 +142,379 @@ class BatchTab(QWidget):
         super().__init__(parent)
         self.dm = data_manager
         self.queue = BatchQueueManager(data_manager, self)
-        self.queue.queue_changed.connect(self._refresh_table)
+        self.queue.queue_changed.connect(self._on_queue_changed)
         self.queue.item_progress.connect(self._on_item_progress)
+        self.queue.stats_changed.connect(self._update_stats)
+
+        # Per-folder UI state (PRD E5-5)
+        self._registry = self.dm.load_batch_registry()
+        self._active_folder: Optional[Path] = None
+        ap = self._registry.get("active_folder")
+        if ap and Path(ap).exists():
+            self._active_folder = Path(ap)
 
         self._setup_ui()
-        self._refresh_table()
-        # Auto-resume any pending work from a previous session
-        self.queue.start_next_if_idle()
 
-    # ----- UI -----
+        # Restore active folder + its expanded tree state.
+        if self._active_folder is not None:
+            self._activate_folder(self._active_folder, persist=False)
+
+        # Throttle status repaints — we don't want every progress tick to
+        # trigger a tree refresh.
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(250)
+        self._refresh_timer.timeout.connect(self.tree.refresh_statuses)
+
+        self._update_stats(self._initial_stats())
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        self.setStyleSheet(PANEL_QSS)
 
-        # Header
-        header = QLabel("Batch Processing")
-        header.setStyleSheet(f"color: {ACCENT}; font-size: 18px; font-weight: bold;")
-        layout.addWidget(header)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
-        # Add controls
-        ctrl_box = QGroupBox("Add to queue")
-        ctrl_layout = QHBoxLayout(ctrl_box)
+        # ---- Title row -------------------------------------------------
+        title_row = QHBoxLayout()
+        title = QLabel("Batch Processing")
+        title.setStyleSheet(f"color: {PINK}; font-size: {TYPE_TITLE}px; font-weight: 600;")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
 
+        # OpenLocationBar (top-right)
+        ol = OpenLocationBar(self)
+        ol.add_folder("Active Folder", lambda: self._active_folder)
+        ol.add_folder("Tracks Output", self.dm.tracks_dir)
+        ol.add_file(
+            "Errors Log",
+            Path.home() / "Documents" / "CCTV-YOLO" / "logs" / "app.log",
+        )
+        title_row.addWidget(ol)
+        root.addLayout(title_row)
+
+        # ---- Top control card ------------------------------------------
+        top_card = QFrame()
+        top_card.setObjectName("card")
+        top_lay = QVBoxLayout(top_card)
+        top_lay.setContentsMargins(12, 10, 12, 10)
+        top_lay.setSpacing(8)
+
+        # Folder picker + active path
+        fp_row = QHBoxLayout()
+        self.btn_pick = QPushButton("📁 Pick Folder…")
+        self.btn_pick.setStyleSheet(PRIMARY_BTN)
+        self.btn_pick.clicked.connect(self._pick_folder)
+        fp_row.addWidget(self.btn_pick)
+
+        self.lbl_active = QLabel("")
+        self.lbl_active.setObjectName("hint")
+        self.lbl_active.setStyleSheet(f"color: {TEXT_MUTED};")
+        fp_row.addWidget(self.lbl_active, stretch=1)
+
+        self.btn_rescan = QPushButton("⟳ Rescan")
+        self.btn_rescan.setStyleSheet(GHOST_BTN)
+        self.btn_rescan.clicked.connect(self._rescan)
+        fp_row.addWidget(self.btn_rescan)
+        top_lay.addLayout(fp_row)
+
+        # Run controls row
+        run_row = QHBoxLayout()
+        run_row.setSpacing(10)
+
+        run_row.addWidget(QLabel("Parallel workers:"))
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 100)
+        self.workers_spin.setValue(self.queue.max_workers())
+        self.workers_spin.valueChanged.connect(self._on_workers_changed)
+        self.workers_spin.setFixedWidth(70)
+        run_row.addWidget(self.workers_spin)
+
+        # Recommend ≤ os.cpu_count()*2
+        cpu = max(1, os.cpu_count() or 1)
+        rec = QLabel(f"  (recommend ≤ {cpu * 2})")
+        rec.setStyleSheet(f"color: {TEXT_MUTED}; font-size: {TYPE_HINT}px;")
+        run_row.addWidget(rec)
+
+        run_row.addSpacing(18)
+
+        run_row.addWidget(QLabel("Stop after:"))
+        self.stop_spin = QSpinBox()
+        self.stop_spin.setRange(0, 100000)
+        self.stop_spin.setValue(0)
+        self.stop_spin.setSpecialValueText("All")
+        self.stop_spin.setFixedWidth(80)
+        self.stop_spin.valueChanged.connect(self._on_stop_after_changed)
+        run_row.addWidget(self.stop_spin)
+
+        self.chk_count_failed = QCheckBox("Count failed toward limit")
+        self.chk_count_failed.setChecked(True)
+        self.chk_count_failed.toggled.connect(self.queue.set_count_failed_toward_limit)
+        run_row.addWidget(self.chk_count_failed)
+
+        run_row.addStretch(1)
+        top_lay.addLayout(run_row)
+
+        # Model + conf row
+        cfg_row = QHBoxLayout()
+        cfg_row.setSpacing(10)
+        cfg_row.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
         self._reload_models()
-        ctrl_layout.addWidget(QLabel("Model:"))
-        ctrl_layout.addWidget(self.model_combo)
+        self.model_combo.setMinimumWidth(180)
+        cfg_row.addWidget(self.model_combo)
 
+        cfg_row.addSpacing(12)
+        cfg_row.addWidget(QLabel("Conf:"))
         self.conf_spin = QDoubleSpinBox()
         self.conf_spin.setRange(0.05, 0.95)
         self.conf_spin.setSingleStep(0.05)
-        self.conf_spin.setValue(self.dm.get_last_confidence())
         self.conf_spin.setDecimals(2)
-        ctrl_layout.addWidget(QLabel("Conf:"))
-        ctrl_layout.addWidget(self.conf_spin)
+        self.conf_spin.setValue(self.dm.get_last_confidence())
+        self.conf_spin.setFixedWidth(80)
+        cfg_row.addWidget(self.conf_spin)
+        cfg_row.addStretch(1)
+        top_lay.addLayout(cfg_row)
 
-        self.priority_spin = QSpinBox()
-        self.priority_spin.setRange(0, 100)
-        self.priority_spin.setValue(0)
-        ctrl_layout.addWidget(QLabel("Priority:"))
-        ctrl_layout.addWidget(self.priority_spin)
+        root.addWidget(top_card)
 
-        ctrl_layout.addStretch()
+        # ---- Stats strip ----------------------------------------------
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet(
+            f"color: {OFFWHITE}; font-size: {TYPE_HINT + 1}px; padding: 2px 6px;"
+        )
+        root.addWidget(self.stats_label)
 
-        btn_files = QPushButton("Add Files…")
-        btn_files.setStyleSheet(ACTION_BTN)
-        btn_files.clicked.connect(self._add_files)
-        ctrl_layout.addWidget(btn_files)
+        # ---- Tree ------------------------------------------------------
+        self.tree = BatchTree(status_provider=self._status_for_path)
+        self.tree.file_activated.connect(self._on_file_activated)
+        self.tree.expansion_changed.connect(self._on_expansion_changed)
+        root.addWidget(self.tree, stretch=1)
 
-        btn_folder = QPushButton("Add Folder (recursive)…")
-        btn_folder.setStyleSheet(ACTION_BTN)
-        btn_folder.clicked.connect(self._add_folder)
-        ctrl_layout.addWidget(btn_folder)
+        # ---- Bottom action row ----------------------------------------
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
 
-        layout.addWidget(ctrl_box)
+        self.btn_start = QPushButton("▶ Start All")
+        self.btn_start.setStyleSheet(PRIMARY_BTN)
+        self.btn_start.clicked.connect(self._start_all)
+        action_row.addWidget(self.btn_start)
 
-        # Watch folder
-        watch_box = QGroupBox("Watch folder (auto-queue new videos)")
-        watch_layout = QHBoxLayout(watch_box)
-        self.watch_path = QLineEdit()
-        self.watch_path.setPlaceholderText("Select a folder to watch…")
-        watch_layout.addWidget(self.watch_path, stretch=1)
-
-        btn_browse = QPushButton("Browse…")
-        btn_browse.clicked.connect(self._browse_watch_folder)
-        watch_layout.addWidget(btn_browse)
-
-        self.poll_spin = QSpinBox()
-        self.poll_spin.setRange(1, 600)
-        self.poll_spin.setValue(5)
-        self.poll_spin.setSuffix(" s")
-        watch_layout.addWidget(QLabel("Poll:"))
-        watch_layout.addWidget(self.poll_spin)
-
-        self.btn_watch = QPushButton("Start Watching")
-        self.btn_watch.setStyleSheet(ACTION_BTN)
-        self.btn_watch.setCheckable(True)
-        self.btn_watch.toggled.connect(self._toggle_watch)
-        watch_layout.addWidget(self.btn_watch)
-
-        layout.addWidget(watch_box)
-
-        # Queue control row
-        ctrl_row = QHBoxLayout()
-        self.btn_pause = QPushButton("Pause Queue")
+        self.btn_pause = QPushButton("⏸ Pause")
+        self.btn_pause.setStyleSheet(GHOST_BTN)
         self.btn_pause.setCheckable(True)
         self.btn_pause.toggled.connect(self._toggle_pause)
-        ctrl_row.addWidget(self.btn_pause)
+        action_row.addWidget(self.btn_pause)
 
-        btn_clear_done = QPushButton("Clear Finished")
-        btn_clear_done.clicked.connect(self.queue.clear_finished)
-        ctrl_row.addWidget(btn_clear_done)
+        self.btn_cancel = QPushButton("✕ Cancel")
+        self.btn_cancel.setStyleSheet(DANGER_BTN)
+        self.btn_cancel.clicked.connect(self._cancel_all)
+        action_row.addWidget(self.btn_cancel)
 
-        ctrl_row.addStretch()
-        self.queue_status = QLabel("0 queued / 0 done")
-        self.queue_status.setStyleSheet("color: #aaa;")
-        ctrl_row.addWidget(self.queue_status)
-        layout.addLayout(ctrl_row)
+        self.btn_clear = QPushButton("🧹 Clear Done")
+        self.btn_clear.setStyleSheet(GHOST_BTN)
+        self.btn_clear.clicked.connect(self.queue.clear_finished)
+        action_row.addWidget(self.btn_clear)
 
-        # Queue table
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(
-            ["Video", "Model", "Conf", "Priority", "Status", "Progress"]
+        action_row.addStretch(1)
+
+        self.btn_review = QPushButton("Open Review for Selected")
+        self.btn_review.setStyleSheet(GHOST_BTN)
+        self.btn_review.clicked.connect(self._review_selected)
+        action_row.addWidget(self.btn_review)
+
+        root.addLayout(action_row)
+
+        self._update_active_label()
+
+    # ------------------------------------------------------------------
+    # Folder management
+    # ------------------------------------------------------------------
+    def _pick_folder(self):
+        start = str(self._active_folder) if self._active_folder else str(Path.home())
+        folder = QFileDialog.getExistingDirectory(self, "Pick a video folder", start)
+        if not folder:
+            return
+        self._activate_folder(Path(folder), persist=True)
+        # Auto-ingest videos so the user can hit Start immediately.
+        self._ingest_folder(Path(folder))
+
+    def _activate_folder(self, folder: Path, *, persist: bool):
+        self._active_folder = folder
+        self.tree.set_root(folder)
+        self._update_active_label()
+
+        folders = self._registry.setdefault("folders", {})
+        entry = folders.setdefault(str(folder), {})
+        entry.setdefault("added_at", _now_iso())
+        # Restore previously-expanded nodes for this folder
+        QTimer.singleShot(0, lambda: self.tree.restore_expanded_paths(
+            entry.get("expanded_paths", [])
+        ))
+
+        if persist:
+            self._registry["active_folder"] = str(folder)
+            self.dm.save_batch_registry(self._registry)
+        else:
+            self._registry["active_folder"] = str(folder)
+
+    def _update_active_label(self):
+        if self._active_folder:
+            self.lbl_active.setText(f"Active: {self._active_folder}")
+        else:
+            self.lbl_active.setText("Active: (no folder selected — Pick Folder… to start)")
+
+    def _rescan(self):
+        if self._active_folder is None:
+            return
+        # Queue any video under the folder that isn't already enqueued.
+        added = self._ingest_folder(self._active_folder)
+        self._registry.setdefault("folders", {}).setdefault(
+            str(self._active_folder), {}
+        )["last_scan_at"] = _now_iso()
+        self.dm.save_batch_registry(self._registry)
+        self._flash_stats(f"Rescan: added {added}")
+
+    def _ingest_folder(self, folder: Path) -> int:
+        """Walk `folder` and add every video to the queue (skipping dups)."""
+        added = 0
+        for p in folder.rglob("*"):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in VIDEO_EXTS:
+                continue
+            sid = self.queue.add(
+                str(p),
+                model=self.model_combo.currentText(),
+                conf=self.conf_spin.value(),
+                source_folder=str(folder),
+            )
+            if sid:
+                added += 1
+        return added
+
+    # ------------------------------------------------------------------
+    # Run controls
+    # ------------------------------------------------------------------
+    def _on_workers_changed(self, n: int):
+        cpu = max(1, os.cpu_count() or 1)
+        self.queue.set_max_workers(n)
+        if n > cpu * 2:
+            self._flash_stats(
+                f"⚠ {n} workers exceeds recommended {cpu * 2} — system may slow"
+            )
+
+    def _on_stop_after_changed(self, n: int):
+        self.queue.set_stop_after_n(n if n > 0 else None)
+
+    def _start_all(self):
+        if self._active_folder is None:
+            QMessageBox.information(self, "Batch", "Pick a folder first.")
+            return
+        # Ensure conf + model are up-to-date for any items that were added
+        # before the user tweaked these controls — refresh only queued items.
+        model = self.model_combo.currentText()
+        conf = float(self.conf_spin.value())
+        for it in self.queue.items:
+            if it["status"] == "queued":
+                it["model"] = model
+                it["conf"] = conf
+        self.queue.start_all()
+        self.dm.set_last_model(model)
+        self.dm.set_last_confidence(conf)
+
+    def _toggle_pause(self, checked: bool):
+        if checked:
+            self.queue.pause_all()
+            self.btn_pause.setText("▶ Resume")
+        else:
+            self.queue.resume_all()
+            self.btn_pause.setText("⏸ Pause")
+
+    def _cancel_all(self):
+        confirm = QMessageBox.question(
+            self, "Cancel batch",
+            "Cancel everything (queued + running)? Partial outputs will be deleted.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in range(1, 6):
-            self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color: {PANEL}; color: {TEXT}; "
-            f"gridline-color: {BORDER}; border: 1px solid {BORDER}; }}"
-            f"QHeaderView::section {{ background-color: {PANEL}; color: {ACCENT}; "
-            f"border: 0; padding: 6px; font-weight: bold; }}"
+        if confirm != QMessageBox.Yes:
+            return
+        self.queue.cancel_all()
+
+    # ------------------------------------------------------------------
+    # Tree integration
+    # ------------------------------------------------------------------
+    def _status_for_path(self, abs_path: str) -> str:
+        st = self.queue.status_for_path(abs_path)
+        return st or "queued"
+
+    def _on_file_activated(self, abs_path: str):
+        # Double-click on a video row → open review for it (if it has tracks).
+        for it in self.queue.items:
+            if it.get("video_path") == abs_path and it.get("status") == "done":
+                self.review_requested.emit(it["session_id"])
+                return
+
+    def _on_expansion_changed(self, expanded: list[str]):
+        if self._active_folder is None:
+            return
+        folders = self._registry.setdefault("folders", {})
+        entry = folders.setdefault(str(self._active_folder), {})
+        entry["expanded_paths"] = list(expanded)
+        self.dm.save_batch_registry(self._registry)
+
+    # ------------------------------------------------------------------
+    # Queue events
+    # ------------------------------------------------------------------
+    def _on_queue_changed(self):
+        # Coalesce status repaints
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _on_item_progress(self, session_id: str, pct: int):
+        # Progress tick — don't repaint the whole tree, just nudge once in a while.
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _initial_stats(self) -> dict:
+        items = self.queue.get_items()
+        return {
+            "total": len(items),
+            "processed": sum(1 for it in items if it["status"] == "done"),
+            "processing": sum(1 for it in items if it["status"] == "processing"),
+            "queued": sum(1 for it in items if it["status"] in ("queued", "paused")),
+            "errors": sum(1 for it in items if it["status"] == "error"),
+            "cancelled": sum(1 for it in items if it["status"] == "cancelled"),
+        }
+
+    def _update_stats(self, stats: dict):
+        total = stats.get("total", 0)
+        processed = stats.get("processed", 0)
+        processing = stats.get("processing", 0)
+        queued = stats.get("queued", 0)
+        errors = stats.get("errors", 0)
+        text = (
+            f"{total} videos · "
+            f"{processed} processed · "
+            f"{processing} processing · "
+            f"{queued} queued · "
+            f"{errors} errors"
         )
-        layout.addWidget(self.table, stretch=1)
+        self.stats_label.setText(text)
 
-        # Row actions
-        row_btns = QHBoxLayout()
-        btn_remove = QPushButton("Remove Selected")
-        btn_remove.setStyleSheet(DANGER_BTN)
-        btn_remove.clicked.connect(self._remove_selected)
-        row_btns.addWidget(btn_remove)
+    def _flash_stats(self, msg: str):
+        """Temporarily replace the stats strip with a toast-style message."""
+        prev = self.stats_label.text()
+        self.stats_label.setText(msg)
+        QTimer.singleShot(2500, lambda: self.stats_label.setText(prev))
 
-        btn_review = QPushButton("Open Review for Selected")
-        btn_review.clicked.connect(self._review_selected)
-        row_btns.addWidget(btn_review)
-
-        row_btns.addStretch()
-        layout.addLayout(row_btns)
-
+    # ------------------------------------------------------------------
+    # Misc
+    # ------------------------------------------------------------------
     def _reload_models(self):
         self.model_combo.clear()
         models = self.dm.list_models()
@@ -210,162 +525,39 @@ class BatchTab(QWidget):
         if last and last in models:
             self.model_combo.setCurrentText(last)
 
-    # ----- Add ops -----
-    def _add_files(self):
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Select videos", "",
-            "Video Files (*.mp4 *.mov *.avi *.mkv);;All Files (*)",
-        )
-        if not files:
-            return
-        added, skipped = 0, 0
-        for f in files:
-            sid = self.queue.add(
-                f,
-                model=self.model_combo.currentText(),
-                conf=self.conf_spin.value(),
-                priority=self.priority_spin.value(),
-            )
-            if sid:
-                added += 1
-            else:
-                skipped += 1
-        self.queue.start_next_if_idle()
-        self._toast(f"Added {added}, skipped {skipped}")
-
-    def _add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select folder")
-        if not folder:
-            return
-        exts = {".mp4", ".mov", ".avi", ".mkv"}
-        added, skipped = 0, 0
-        for p in Path(folder).rglob("*"):
-            if p.is_file() and p.suffix.lower() in exts:
-                sid = self.queue.add(
-                    str(p),
-                    model=self.model_combo.currentText(),
-                    conf=self.conf_spin.value(),
-                    priority=self.priority_spin.value(),
-                )
-                if sid:
-                    added += 1
-                else:
-                    skipped += 1
-        self.queue.start_next_if_idle()
-        self._toast(f"Folder ingest: added {added}, skipped {skipped}")
-
-    def _browse_watch_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select watch folder")
-        if folder:
-            self.watch_path.setText(folder)
-
-    def _toggle_watch(self, checked: bool):
-        if checked:
-            folder = self.watch_path.text().strip()
-            if not folder or not Path(folder).exists():
-                QMessageBox.warning(self, "Watch folder", "Please pick a valid folder first.")
-                self.btn_watch.setChecked(False)
-                return
-            self.queue.start_watch_folder(
-                Path(folder),
-                model=self.model_combo.currentText(),
-                conf=self.conf_spin.value(),
-                poll_seconds=self.poll_spin.value(),
-            )
-            self.btn_watch.setText("Stop Watching")
-        else:
-            self.queue.stop_watch_folder()
-            self.btn_watch.setText("Start Watching")
-
-    def _toggle_pause(self, checked: bool):
-        if checked:
-            self.queue.pause_all()
-            self.btn_pause.setText("Resume Queue")
-        else:
-            self.queue.resume_all()
-            self.btn_pause.setText("Pause Queue")
-
-    # ----- Row ops -----
-    def _selected_session(self) -> str | None:
-        row = self.table.currentRow()
-        if row < 0:
-            return None
-        item = self.table.item(row, 0)
-        return item.data(Qt.UserRole) if item else None
-
-    def _remove_selected(self):
-        sid = self._selected_session()
-        if not sid:
-            return
-        self.queue.remove(sid)
-
     def _review_selected(self):
-        sid = self._selected_session()
-        if sid:
-            self.review_requested.emit(sid)
-
-    # ----- Refresh -----
-    def _refresh_table(self):
-        items = self.queue.get_items()
-        self.table.setRowCount(len(items))
-        done = 0
-        queued = 0
-        for r, it in enumerate(items):
-            name = Path(it["video_path"]).name
-            cell = QTableWidgetItem(name)
-            cell.setData(Qt.UserRole, it["session_id"])
-            cell.setToolTip(it["video_path"])
-            self.table.setItem(r, 0, cell)
-            self.table.setItem(r, 1, QTableWidgetItem(it["model"]))
-            self.table.setItem(r, 2, QTableWidgetItem(f"{it['conf']:.2f}"))
-            self.table.setItem(r, 3, QTableWidgetItem(str(it.get("priority", 0))))
-
-            status = it["status"]
-            status_item = QTableWidgetItem(status)
-            color = {
-                "queued": "#888",
-                "processing": ACCENT,
-                "done": "#5dade2",
-                "error": "#e74c3c",
-                "paused": "#f39c12",
-            }.get(status, TEXT)
-            status_item.setForeground(Qt.GlobalColor.white if status != "processing" else Qt.black)
-            status_item.setData(Qt.ToolTipRole, it.get("error") or "")
-            self.table.setItem(r, 4, status_item)
-
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(int(it.get("progress", 0)))
-            bar.setTextVisible(True)
-            self.table.setCellWidget(r, 5, bar)
-
-            if status == "done":
-                done += 1
-            elif status in ("queued", "paused"):
-                queued += 1
-
-        self.queue_status.setText(f"{queued} queued / {done} done / {len(items)} total")
-
-    def _on_item_progress(self, session_id: str, pct: int):
-        for r in range(self.table.rowCount()):
-            cell = self.table.item(r, 0)
-            if cell and cell.data(Qt.UserRole) == session_id:
-                bar = self.table.cellWidget(r, 5)
-                if bar:
-                    bar.setValue(pct)
-                break
+        paths = self.tree.selected_video_paths()
+        if not paths:
+            return
+        target = paths[0]
+        for it in self.queue.items:
+            if it.get("video_path") == target and it.get("status") == "done":
+                self.review_requested.emit(it["session_id"])
+                return
+        QMessageBox.information(
+            self, "Review",
+            "Selected video isn't processed yet. Start the batch first.",
+        )
 
     def refresh(self):
         self._reload_models()
-        self._refresh_table()
+        self._on_queue_changed()
 
     def shutdown(self):
         self.queue.shutdown()
-
-    # ----- Toast -----
-    def _toast(self, msg: str):
-        self.queue_status.setText(msg)
+        if self._active_folder is not None:
+            self._registry["active_folder"] = str(self._active_folder)
+            self.dm.save_batch_registry(self._registry)
 
     def closeEvent(self, event):
         self.shutdown()
         super().closeEvent(event)
+
+
+# ---------------------------------------------------------------------------
+# small helper
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat(timespec="seconds")

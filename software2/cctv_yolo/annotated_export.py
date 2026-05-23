@@ -106,8 +106,16 @@ def annotate_video(
     fourcc: str = "mp4v",
     blur_lp: bool = False,
     progress_callback=None,
+    roi_id: str | None = None,
 ) -> dict:
     """Write an annotated MP4 alongside the originals.
+
+    Parameters
+    ----------
+    roi_id : str | None
+        If given, only render bounding boxes for tracks whose bbox center
+        falls inside the named/id'd ROI on at least one frame (PRD F3-2
+        export filter). ROIs themselves are still drawn.
 
     Returns
     -------
@@ -136,9 +144,27 @@ def annotate_video(
         cap.release()
         raise RuntimeError(f"Cannot open writer for {output_path}")
 
+    # ROI filter (PRD F3-2): only include tracks that pass through this ROI
+    tracks_in = track_data.get("tracks", [])
+    rois_for_filter = track_data.get("rois", []) or []
+    if roi_id:
+        roi_target = None
+        for r in rois_for_filter:
+            if r.get("id") == roi_id or r.get("name") == roi_id:
+                roi_target = r
+                break
+        if roi_target is not None:
+            kept = []
+            for tr in tracks_in:
+                for fd in tr.get("frames", []):
+                    if _bbox_in_roi(fd["bbox"], roi_target):
+                        kept.append(tr)
+                        break
+            tracks_in = kept
+
     # Index detections by frame
     per_frame = defaultdict(list)
-    tracks = track_data.get("tracks", [])
+    tracks = tracks_in
     for tr in tracks:
         cls = tr.get("class", "vehicle")
         tid = tr.get("track_id", 0)
@@ -252,12 +278,13 @@ class AnnotatedVideoWorker(QThread):
     error = Signal(str, str)
 
     def __init__(self, data_manager, session_id: str, output_path: Optional[Path] = None,
-                 blur_lp: bool = False, parent=None):
+                 blur_lp: bool = False, roi_id: str | None = None, parent=None):
         super().__init__(parent)
         self.dm = data_manager
         self.session_id = session_id
         self.output_path = output_path
         self.blur_lp = blur_lp
+        self.roi_id = roi_id
 
     def run(self):
         try:
@@ -283,6 +310,7 @@ class AnnotatedVideoWorker(QThread):
                 output_path=self.output_path,
                 blur_lp=self.blur_lp,
                 progress_callback=_on_progress,
+                roi_id=self.roi_id,
             )
             self.progress.emit(self.session_id, 100)
             self.finished.emit(self.session_id, str(self.output_path), stats)

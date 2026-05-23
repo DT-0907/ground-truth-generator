@@ -16,10 +16,10 @@ import json
 import math
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from cctv_yolo.analytics import bbox_in_roi
 
@@ -176,6 +176,120 @@ def detect_anomalies(
 
     anomalies.sort(key=lambda a: -abs(a.z_score))
     return anomalies
+
+
+def detect_anomalies_batch(
+    data_manager,
+    session_ids: Iterable[str],
+    z_threshold: float = 2.0,
+) -> list[Anomaly]:
+    """Run :func:`detect_anomalies` for each session in *session_ids* and
+    return a flattened, z-sorted list. The ``session_id`` attribute on each
+    Anomaly identifies the originating clip — used as a column in the
+    Group / Dataset / Multi insights sub-tabs (PRD I2).
+    """
+    out: list[Anomaly] = []
+    sids = list(session_ids)
+    sid_set = set(sids)
+    for sid in sids:
+        target = data_manager.load_session_data(sid)
+        if not target:
+            continue
+        # Build a baseline excluding all sessions in the requested set
+        # so per-session anomalies don't get suppressed by their own data.
+        baseline: dict = defaultdict(lambda: {
+            "count": [],
+            "class_share": defaultdict(list),
+            "sessions": [],
+        })
+        for s in data_manager.get_sessions():
+            other = s["id"]
+            if other in sid_set:
+                continue
+            data = data_manager.load_session_data(other)
+            if not data:
+                continue
+            agg = _aggregate_session(data)
+            for (hour, roi), stats in agg.items():
+                d = baseline[(hour, roi)]
+                d["count"].append(stats["count"])
+                total = max(1, stats["count"])
+                for cls, n in stats["class"].items():
+                    d["class_share"][cls].append(n / total)
+                d["sessions"].append(other)
+
+        target_agg = _aggregate_session(target)
+        for (hour, roi), stats in target_agg.items():
+            b = baseline.get((hour, roi))
+            if not b or len(b["count"]) < 2:
+                continue
+            mean = statistics.mean(b["count"])
+            std = statistics.pstdev(b["count"])
+            z = _zscore(stats["count"], mean, std)
+            if abs(z) >= z_threshold:
+                out.append(Anomaly(
+                    session_id=sid, hour=hour, roi=roi, metric="count",
+                    value=stats["count"],
+                    baseline_mean=round(mean, 2),
+                    baseline_std=round(std, 2),
+                    z_score=round(z, 2),
+                ))
+            total = max(1, stats["count"])
+            for cls, n in stats["class"].items():
+                share = n / total
+                shares = b["class_share"].get(cls, [])
+                if len(shares) < 2:
+                    continue
+                cmean = statistics.mean(shares)
+                cstd = statistics.pstdev(shares)
+                cz = _zscore(share, cmean, cstd)
+                if abs(cz) >= z_threshold:
+                    out.append(Anomaly(
+                        session_id=sid, hour=hour, roi=roi,
+                        metric=f"class_share:{cls}",
+                        value=round(share, 3),
+                        baseline_mean=round(cmean, 3),
+                        baseline_std=round(cstd, 3),
+                        z_score=round(cz, 2),
+                    ))
+    out.sort(key=lambda a: -abs(a.z_score))
+    return out
+
+
+def save_anomalies(anomalies: list[Anomaly], out_dir: Path,
+                   ts: Optional[str] = None) -> Path:
+    """Write a list of Anomaly objects to ``out_dir/anomalies_<ts>.json``.
+
+    PRD I3.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = ts or datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = out_dir / f"anomalies_{ts}.json"
+    payload = {
+        "saved_at": datetime.now().isoformat(),
+        "count": len(anomalies),
+        "anomalies": [asdict(a) for a in anomalies],
+    }
+    with open(out, "w") as f:
+        json.dump(payload, f, indent=2)
+    return out
+
+
+def load_anomalies(path: Path) -> list[Anomaly]:
+    """Load anomalies previously saved by :func:`save_anomalies`."""
+    with open(Path(path), "r") as f:
+        data = json.load(f)
+    rows = data.get("anomalies", [])
+    return [Anomaly(**row) for row in rows]
+
+
+def list_anomaly_history(folder: Path) -> list[Path]:
+    """Return all anomaly snapshots under ``folder``, newest first."""
+    p = Path(folder)
+    if not p.exists():
+        return []
+    return sorted(p.glob("anomalies_*.json"), reverse=True)
 
 
 def baseline_summary(distrib: dict) -> list[dict]:

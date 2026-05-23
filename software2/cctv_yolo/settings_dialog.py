@@ -67,7 +67,7 @@ QGroupBox::title {{
 FOLDER_BTN_STYLE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 4px 12px;
@@ -76,34 +76,34 @@ QPushButton {{
     min-width: 60px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: #E491C9;
 }}
 """
 
 INPUT_STYLE = f"""
 QLineEdit {{
-    background-color: #0d1525;
+    background-color: #15173D;
     color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 13px;
     selection-background-color: {ACCENT};
-    selection-color: #000;
+    selection-color: #15173D;
 }}
 QLineEdit:focus {{
     border: 1px solid {ACCENT};
-    background-color: #111b30;
+    background-color: #15173D;
 }}
 QLineEdit:hover {{
-    border: 1px solid #3d4e73;
+    border: 1px solid #2D2F60;
 }}
 """
 
 CONNECT_BTN_STYLE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     border-radius: 4px;
     padding: 8px 24px;
@@ -111,17 +111,17 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #3bbb91;
+    background-color: #E491C9;
 }}
 QPushButton:disabled {{
     background-color: {BORDER};
-    color: #666;
+    color: #A89BA8;
 }}
 """
 
 DISCONNECT_BTN_STYLE = f"""
 QPushButton {{
-    background-color: #e74c3c;
+    background-color: #FF6B7A;
     color: white;
     border: none;
     border-radius: 4px;
@@ -130,13 +130,13 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #c0392b;
+    background-color: #FF6B7A;
 }}
 """
 
 PATH_LABEL_STYLE = f"""
 QLabel {{
-    color: #8899aa;
+    color: #A89BA8;
     font-size: 12px;
     font-family: "SF Mono", "Menlo", "Courier New", monospace;
     padding: 6px 8px;
@@ -148,7 +148,7 @@ QLabel {{
 STATUS_CONNECTED = f"""
 QLabel {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border-radius: 12px;
     padding: 6px 16px;
     font-weight: bold;
@@ -159,7 +159,7 @@ QLabel {{
 
 STATUS_DISCONNECTED = f"""
 QLabel {{
-    background-color: #c0392b;
+    background-color: #FF6B7A;
     color: white;
     border-radius: 12px;
     padding: 6px 16px;
@@ -184,12 +184,12 @@ QDialogButtonBox QPushButton:hover {{
 }}
 QDialogButtonBox QPushButton:default {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border: none;
     font-weight: bold;
 }}
 QDialogButtonBox QPushButton:default:hover {{
-    background-color: #3bbb91;
+    background-color: #E491C9;
 }}
 """
 
@@ -433,7 +433,7 @@ class SettingsDialog(QDialog):
             self.mode_changed.emit("nas")
         else:
             self.lbl_nas_message.setText(f"Connection failed: {message}")
-            self.lbl_nas_message.setStyleSheet("color: #e74c3c; font-size: 12px;")
+            self.lbl_nas_message.setStyleSheet("color: #FF6B7A; font-size: 12px;")
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
 

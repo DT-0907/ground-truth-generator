@@ -43,6 +43,7 @@ from cctv_yolo.review_window import ReviewWindow
 # ---------------------------------------------------------------------------
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    PINK, INDIGO,
 )
 
 STYLE = f"""
@@ -63,7 +64,7 @@ QStatusBar {{
 MODE_BADGE_LOCAL = f"""
 QLabel {{
     background-color: {ACCENT};
-    color: #000;
+    color: #15173D;
     border-radius: 10px;
     padding: 4px 14px;
     font-weight: bold;
@@ -75,8 +76,8 @@ QLabel {{
 
 MODE_BADGE_NAS = f"""
 QLabel {{
-    background-color: #3498db;
-    color: white;
+    background-color: {PINK};
+    color: {INDIGO};
     border-radius: 10px;
     padding: 4px 14px;
     font-weight: bold;
@@ -419,14 +420,23 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_about(self):
-        QMessageBox.about(
-            self,
-            "About CCTV-YOLO",
-            "CCTV-YOLO v2.0\n\n"
-            "Vehicle detection & correction tool\n"
-            "YOLOv8 + ByteTrack\n\n"
-            "Native desktop application built with PySide6.",
-        )
+        # PRD C8 — rich About dialog with version + platform + folder shortcuts.
+        try:
+            from cctv_yolo.about_dialog import AboutDialog
+            dlg = AboutDialog(self.data_manager, parent=self)
+            # Modal QDialog event loop (Qt method, not shell exec).
+            getattr(dlg, "exec")()
+        except Exception:
+            # Fallback to plain QMessageBox if the dialog can't load.
+            from cctv_yolo.__version__ import __version__
+            QMessageBox.about(
+                self,
+                "About CCTV-YOLO",
+                f"CCTV-YOLO v{__version__}\n\n"
+                "Vehicle detection & correction tool\n"
+                "YOLOv8 + ByteTrack\n\n"
+                "Native desktop application built with PySide6.",
+            )
 
     def _show_shortcuts(self):
         shortcuts_text = (

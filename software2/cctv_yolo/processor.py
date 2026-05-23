@@ -3,12 +3,30 @@ Video processor: Detection + Tracking pipeline using Ultralytics.
 """
 
 import json
+import logging
+import time
 import cv2
 import numpy as np
 import torch
 from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
+
+
+class ProcessingError(RuntimeError):
+    """User-friendly processing error. ``str(err)`` is safe to show in the UI."""
+    pass
+
+
+class BatchCancelled(Exception):
+    """Raised by process_video when a should_cancel() callback returns True.
+
+    Caught by the batch scheduler so partial outputs can be cleaned up and
+    the item can be re-queued (or removed) cleanly.
+    """
+    pass
 
 
 def _get_device():
@@ -84,7 +102,10 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
                   model_name: str = "yolov8m.pt", conf_threshold: float = 0.25,
                   feedback_file: str = None, session_id: str = None,
                   progress_callback=None, models_dir: str = None,
-                  processing_roi: dict = None) -> dict:
+                  processing_roi: dict = None,
+                  should_cancel=None,
+                  progress_detail_callback=None,
+                  sample_rate: int = 1) -> dict:
     """
     Process a video file: detect vehicles and track them across frames.
 
@@ -101,10 +122,20 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         processing_roi: Optional ROI dict to filter detections. Only detections
                        whose bbox center falls inside the ROI are kept.
                        Format: {"type": "rect"|"polygon", "points": [...]}
+        should_cancel: Optional callable returning True if the caller wants
+                       processing to abort. Checked once per frame. When it
+                       returns True, ``BatchCancelled`` is raised so the
+                       scheduler can clean up partial output.
+        progress_detail_callback: Optional callable(percent, fps, eta_seconds).
+                       Called once per frame with throughput and ETA.
+        sample_rate: Process every Nth frame (1 = all frames). Frames that are
+                     skipped do not generate detections but the frame index is
+                     preserved so downstream tools can still interpolate.
 
     Returns:
         dict with tracks data
     """
+    sample_rate = max(1, int(sample_rate))
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -139,12 +170,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             print(f"Loading model: {model_name} (will download if not cached)")
             model = YOLO(model_name)
     except Exception as e:
-        raise RuntimeError(
-            f"Failed to load YOLO model '{model_name}'. "
-            f"Checked local path: {local_model}\n"
-            f"If you have no internet connection, place the model file in:\n"
-            f"  {_models_dir}\n\n"
-            f"Original error: {e}"
+        logger.exception("Model load failed: %s", model_name)
+        raise ProcessingError(
+            "Model file is invalid or corrupt. Try re-importing."
         ) from e
 
     # Select best available device (CUDA > MPS > CPU). GPU is always
@@ -161,9 +189,18 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     print(f"Model loaded on device: {device}")
 
     # Open video
-    cap = cv2.VideoCapture(str(video_path))
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+    except cv2.error as e:
+        logger.exception("OpenCV error opening %s", video_path)
+        raise ProcessingError(
+            "Couldn't read this video. Try re-encoding to H.264 MP4."
+        ) from e
     if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video_path}")
+        logger.error("cv2.VideoCapture.isOpened() returned False for %s", video_path)
+        raise ProcessingError(
+            "Couldn't read this video. Try re-encoding to H.264 MP4."
+        )
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -180,73 +217,135 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     # though model.to(device) was already called. (Some Ultralytics versions
     # ignore the model's current device on track() unless told.)
     print("Running detection + tracking...")
-    results = model.track(
-        source=str(video_path),
-        conf=conf_threshold,
-        classes=list(VEHICLE_CLASSES.keys()),
-        tracker="bytetrack.yaml",
-        stream=True,
-        device=device,
-        verbose=False
-    )
+    try:
+        results = model.track(
+            source=str(video_path),
+            conf=conf_threshold,
+            classes=list(VEHICLE_CLASSES.keys()),
+            tracker="bytetrack.yaml",
+            stream=True,
+            device=device,
+            verbose=False,
+            vid_stride=sample_rate,
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        if "out of memory" in msg or "oom" in msg:
+            logger.exception("OOM starting tracker")
+            raise ProcessingError(
+                "Out of memory. Try a smaller model (e.g. yolov8n) or "
+                "reduce video resolution."
+            ) from e
+        logger.exception("Tracker start failed")
+        raise
 
     # Collect tracks
     tracks_dict = {}  # track_id -> track data
 
     last_pct = 0
-    for frame_idx, result in enumerate(results):
-        # Report progress
-        if progress_callback and total_frames > 0:
-            pct = int((frame_idx + 1) / total_frames * 100)
-            if pct != last_pct:
-                progress_callback(pct)
-                last_pct = pct
+    start_time = time.time()
+    processed_frames = 0
+    try:
+        for stream_idx, result in enumerate(results):
+            # vid_stride means each yielded frame corresponds to
+            # stream_idx * sample_rate in the source video.
+            frame_idx = stream_idx * sample_rate
+            processed_frames = stream_idx + 1
+            # Cooperative cancel — checked once per frame before any heavy work.
+            if should_cancel is not None and should_cancel():
+                raise BatchCancelled(f"Cancelled at frame {frame_idx}/{total_frames}")
 
-        if result.boxes is None or len(result.boxes) == 0:
-            continue
+            # Report progress + detail
+            if total_frames > 0:
+                pct = int((frame_idx + 1) / total_frames * 100)
+                if pct != last_pct:
+                    if progress_callback:
+                        progress_callback(pct)
+                    if progress_detail_callback:
+                        elapsed = max(time.time() - start_time, 1e-6)
+                        cur_fps = processed_frames / elapsed
+                        remaining_src = max(total_frames - frame_idx - 1, 0)
+                        remaining_processed = remaining_src / max(sample_rate, 1)
+                        eta = remaining_processed / cur_fps if cur_fps > 0 else 0.0
+                        try:
+                            progress_detail_callback(pct, cur_fps, eta)
+                        except Exception:
+                            logger.exception("progress_detail_callback failed")
+                    last_pct = pct
 
-        boxes = result.boxes
-
-        # Check if tracking IDs are available
-        if boxes.id is None:
-            continue
-
-        for i in range(len(boxes)):
-            track_id = int(boxes.id[i].item())
-            bbox = boxes.xyxy[i].cpu().numpy().tolist()
-            conf = float(boxes.conf[i].item())
-            class_id = int(boxes.cls[i].item())
-            class_name = VEHICLE_CLASSES.get(class_id, 'unknown')
-
-            # Filter by processing ROI if defined
-            if processing_roi and not _bbox_center_in_roi(bbox, processing_roi):
+            if result.boxes is None or len(result.boxes) == 0:
                 continue
 
-            # Apply confidence adjustment from feedback
-            adjustment_key = f"{class_name}"
-            if adjustment_key in confidence_adjustments:
-                adj = confidence_adjustments[adjustment_key]
-                if conf < adj.get('flag_threshold', 1.0):
-                    pass
+            boxes = result.boxes
 
-            if track_id not in tracks_dict:
-                tracks_dict[track_id] = {
-                    'track_id': track_id,
-                    'class': class_name,
-                    'class_id': class_id,
-                    'frames': [],
-                    'start_frame': frame_idx,
-                    'end_frame': frame_idx,
-                    'needs_review': False,
-                    'avg_confidence': 0.0
-                }
+            # Check if tracking IDs are available
+            if boxes.id is None:
+                continue
 
-            tracks_dict[track_id]['frames'].append({
-                'frame': frame_idx,
-                'bbox': [round(x, 1) for x in bbox],
-                'conf': round(conf, 3)
-            })
-            tracks_dict[track_id]['end_frame'] = frame_idx
+            for i in range(len(boxes)):
+                track_id = int(boxes.id[i].item())
+                bbox = boxes.xyxy[i].cpu().numpy().tolist()
+                conf = float(boxes.conf[i].item())
+                class_id = int(boxes.cls[i].item())
+                class_name = VEHICLE_CLASSES.get(class_id, 'unknown')
+
+                # Filter by processing ROI if defined
+                if processing_roi and not _bbox_center_in_roi(bbox, processing_roi):
+                    continue
+
+                # Apply confidence adjustment from feedback
+                adjustment_key = f"{class_name}"
+                if adjustment_key in confidence_adjustments:
+                    adj = confidence_adjustments[adjustment_key]
+                    if conf < adj.get('flag_threshold', 1.0):
+                        pass
+
+                if track_id not in tracks_dict:
+                    tracks_dict[track_id] = {
+                        'track_id': track_id,
+                        'class': class_name,
+                        'class_id': class_id,
+                        'frames': [],
+                        'start_frame': frame_idx,
+                        'end_frame': frame_idx,
+                        'needs_review': False,
+                        'avg_confidence': 0.0
+                    }
+
+                tracks_dict[track_id]['frames'].append({
+                    'frame': frame_idx,
+                    'bbox': [round(x, 1) for x in bbox],
+                    'conf': round(conf, 3)
+                })
+                tracks_dict[track_id]['end_frame'] = frame_idx
+    except BatchCancelled:
+        raise
+    except torch.cuda.OutOfMemoryError as e:  # type: ignore[attr-defined]
+        logger.exception("CUDA OOM during inference")
+        raise ProcessingError(
+            "Out of memory. Try a smaller model (e.g. yolov8n) or "
+            "reduce video resolution."
+        ) from e
+    except RuntimeError as e:
+        msg = str(e).lower()
+        if "out of memory" in msg or "oom" in msg:
+            logger.exception("Runtime OOM during inference")
+            raise ProcessingError(
+                "Out of memory. Try a smaller model (e.g. yolov8n) or "
+                "reduce video resolution."
+            ) from e
+        if "cannot open video" in msg or "could not open" in msg:
+            logger.exception("Video read error during inference")
+            raise ProcessingError(
+                "Couldn't read this video. Try re-encoding to H.264 MP4."
+            ) from e
+        logger.exception("Unhandled runtime error during inference")
+        raise
+    except cv2.error as e:
+        logger.exception("OpenCV error during inference")
+        raise ProcessingError(
+            "Couldn't read this video. Try re-encoding to H.264 MP4."
+        ) from e
 
     # Post-process tracks
     tracks = list(tracks_dict.values())
@@ -261,6 +360,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
 
     tracks.sort(key=lambda t: t['start_frame'])
 
+    processing_time = round(time.time() - start_time, 2)
     output_data = {
         'video_path': str(video_path),
         'video_name': video_path.name,
@@ -270,6 +370,8 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         'processed_at': datetime.now().isoformat(),
         'model': model_name,
         'conf_threshold': conf_threshold,
+        'sample_rate': sample_rate,
+        'processing_time': processing_time,
         'processing_roi': processing_roi,
         'tracks': tracks,
         'stats': {

@@ -3,6 +3,13 @@ REM ============================================================
 REM  Build CCTV-YOLO v2 (Native) for Windows
 REM  Output: dist\CCTV-YOLO\CCTV-YOLO.exe
 REM ============================================================
+REM
+REM NOTE: %TEMP% is sometimes inside OneDrive or actively scanned by AV
+REM (Windows Defender real-time protection in particular). If the build
+REM fails with cryptic permission errors during PyInstaller's COLLECT
+REM phase, exclude %TEMP%\cyb and %TEMP%\cyd from AV scanning or move
+REM the working dirs outside any OneDrive-synced location.
+REM
 setlocal enabledelayedexpansion
 
 echo ==========================================

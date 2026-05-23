@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Optional
 
 from cctv_yolo import analytics
+from cctv_yolo.theme import (
+    INDIGO, PANEL, BORDER, PURPLE, PINK, OFFWHITE, TEXT_MUTED,
+)
 
 
 def _b64_image(path: Path) -> str:
@@ -38,28 +41,28 @@ _TEMPLATE = """<!doctype html>
 <style>
   body {{
     margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-    background: #0e1424; color: #eee;
+    background: """ + INDIGO + """; color: """ + OFFWHITE + """;
   }}
-  header {{ padding: 22px 32px; background: #16213e; border-bottom: 2px solid #4ecca3; }}
-  h1 {{ margin: 0; color: #4ecca3; font-size: 22px; }}
-  h2 {{ color: #4ecca3; margin-top: 32px; }}
+  header {{ padding: 22px 32px; background: """ + PANEL + """; border-bottom: 2px solid """ + PURPLE + """; }}
+  h1 {{ margin: 0; color: """ + PINK + """; font-size: 22px; }}
+  h2 {{ color: """ + PINK + """; margin-top: 32px; border-bottom: 1px solid """ + PURPLE + """; padding-bottom: 4px; }}
   main {{ max-width: 1100px; margin: 0 auto; padding: 28px 32px; }}
   .stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
   .card {{
-    background: #16213e; padding: 14px; border-radius: 8px;
-    border-top: 2px solid #4ecca3;
+    background: """ + PANEL + """; padding: 14px; border-radius: 8px;
+    border-top: 2px solid """ + PURPLE + """;
   }}
-  .num {{ color: #4ecca3; font-size: 28px; font-weight: 700; }}
-  .lab {{ font-size: 12px; opacity: 0.7; }}
+  .num {{ color: """ + PINK + """; font-size: 28px; font-weight: 700; }}
+  .lab {{ font-size: 12px; color: """ + TEXT_MUTED + """; }}
   table {{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
-  th, td {{ padding: 8px; border: 1px solid #2d3a5a; text-align: left; }}
-  th {{ background: #16213e; color: #4ecca3; font-size: 12px; }}
-  td.num {{ text-align: right; font-size: 14px; color: #eee; font-weight: 400; }}
-  img {{ max-width: 100%; border: 1px solid #2d3a5a; border-radius: 6px; }}
+  th, td {{ padding: 8px; border: 1px solid """ + BORDER + """; text-align: left; }}
+  th {{ background: """ + PANEL + """; color: """ + PINK + """; font-size: 12px; }}
+  td.num {{ text-align: right; font-size: 14px; color: """ + OFFWHITE + """; font-weight: 400; }}
+  img {{ max-width: 100%; border: 1px solid """ + BORDER + """; border-radius: 6px; }}
   video {{ max-width: 100%; border-radius: 6px; }}
-  .muted {{ color: #888; font-size: 13px; }}
+  .muted {{ color: """ + TEXT_MUTED + """; font-size: 13px; }}
   details {{ margin: 12px 0; }}
-  summary {{ cursor: pointer; color: #4ecca3; font-weight: 600; }}
+  summary {{ cursor: pointer; color: """ + PINK + """; font-weight: 600; }}
 </style>
 </head>
 <body>
@@ -256,4 +259,103 @@ def render_html_report(
     )
 
     output_path.write_text(html, encoding="utf-8")
+    return output_path
+
+
+# ---------------------------------------------------------------------------
+# Group report (PRD H4)
+# ---------------------------------------------------------------------------
+
+def render_group_html_report(
+    data_manager,
+    group_id: str,
+    output_dir: Optional[Path] = None,
+) -> Path:
+    """Aggregate report for every session in a group.
+
+    Lists each session as a card with its summary stats + a link to the
+    per-session report if one exists. Mostly a table-of-contents view.
+    """
+    group = data_manager.get_group(group_id)
+    if not group:
+        raise FileNotFoundError(f"No group {group_id}")
+    sessions = data_manager.get_sessions_in_group(group_id)
+
+    if output_dir is None:
+        output_dir = data_manager.exports_dir / "groups" / group_id
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "report.html"
+
+    total_tracks = 0
+    total_needs_review = 0
+    rows_html = []
+    for s in sessions:
+        sid = s["id"]
+        data = data_manager.load_session_data(sid) or {}
+        tracks = data.get("tracks", [])
+        n_tracks = len(tracks)
+        n_review = sum(1 for t in tracks if t.get("needs_review"))
+        total_tracks += n_tracks
+        total_needs_review += n_review
+
+        # Try to link to existing per-session report if rendered.
+        per_report = data_manager.exports_dir / sid / "report.html"
+        link = (f"<a href='../../{sid}/report.html'>open report</a>"
+                if per_report.exists() else "<span class='muted'>(no report)</span>")
+        rows_html.append(
+            f"<tr><td>{s.get('video_name', sid)}</td>"
+            f"<td class='num'>{n_tracks}</td>"
+            f"<td class='num'>{n_review}</td>"
+            f"<td>{link}</td></tr>"
+        )
+
+    body = (
+        f"<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>Group report — {group.get('name', group_id)}</title>"
+        f"<style>"
+        f"body {{ margin:0; font-family:-apple-system,Segoe UI,Roboto,sans-serif;"
+        f" background:{INDIGO}; color:{OFFWHITE}; }}"
+        f"header {{ padding:22px 32px; background:{PANEL};"
+        f" border-bottom:2px solid {PURPLE}; }}"
+        f"h1 {{ margin:0; color:{PINK}; font-size:22px; }}"
+        f"h2 {{ color:{PINK}; margin-top:32px; border-bottom:1px solid {PURPLE};"
+        f" padding-bottom:4px; }}"
+        f"main {{ max-width:1100px; margin:0 auto; padding:28px 32px; }}"
+        f".stats {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }}"
+        f".card {{ background:{PANEL}; padding:14px; border-radius:8px;"
+        f" border-top:2px solid {PURPLE}; }}"
+        f".num {{ color:{PINK}; font-size:28px; font-weight:700; }}"
+        f".lab {{ font-size:12px; color:{TEXT_MUTED}; }}"
+        f"table {{ border-collapse:collapse; width:100%; margin:12px 0; }}"
+        f"th,td {{ padding:8px; border:1px solid {BORDER}; text-align:left; }}"
+        f"th {{ background:{PANEL}; color:{PINK}; font-size:12px; }}"
+        f"td.num {{ text-align:right; }}"
+        f"a {{ color:{PINK}; }}"
+        f".muted {{ color:{TEXT_MUTED}; font-size:13px; }}"
+        f"</style></head><body>"
+        f"<header><h1>Group: {group.get('name', group_id)}</h1>"
+        f"<div class='muted'>{len(sessions)} sessions · "
+        f"{group.get('description', '') or 'no description'}</div></header>"
+        f"<main>"
+        f"<h2>Aggregate</h2>"
+        f"<div class='stats'>"
+        f"<div class='card'><div class='num'>{len(sessions)}</div>"
+        f"<div class='lab'>Sessions</div></div>"
+        f"<div class='card'><div class='num'>{total_tracks}</div>"
+        f"<div class='lab'>Total tracks</div></div>"
+        f"<div class='card'><div class='num'>{total_needs_review}</div>"
+        f"<div class='lab'>Needs review</div></div>"
+        f"</div>"
+        f"<h2>Sessions</h2>"
+        f"<table><tr><th>Session</th><th>Tracks</th>"
+        f"<th>Needs review</th><th>Report</th></tr>"
+        + "\n".join(rows_html)
+        + "</table>"
+        + f"<p class='muted'>Generated "
+        + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        + " by CCTV-YOLO.</p></main></body></html>"
+    )
+
+    output_path.write_text(body, encoding="utf-8")
     return output_path

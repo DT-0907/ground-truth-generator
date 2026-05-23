@@ -58,6 +58,15 @@ claude-work/data/
 logs/
 .planning/
 .bak/
+*.bak-*
 config/
 models/
 data/.DS_Store
+
+# PyInstaller intermediate warnings (regenerated every build)
+software2/build/warn-*.txt
+**/warn-cctv_yolo.txt
+*.spec.bak
+
+# First-run marker (per-user)
+.first_run_complete

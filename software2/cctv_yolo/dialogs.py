@@ -20,31 +20,31 @@ VEHICLE_SUBCLASSES = {
 # Dark theme stylesheet for dialogs
 DIALOG_STYLE = """
 QDialog {
-    background: #16213e;
+    background: #1E2050;
     color: #eee;
 }
 QLabel {
     color: #eee;
 }
 QComboBox, QLineEdit {
-    background: #1a1a2e;
+    background: #15173D;
     color: #fff;
-    border: 1px solid #2d3a5a;
+    border: 1px solid #2D2F60;
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 14px;
 }
 QComboBox:focus, QLineEdit:focus {
-    border-color: #4ecca3;
+    border-color: #982598;
 }
 QComboBox::drop-down {
     border: none;
     padding-right: 8px;
 }
 QComboBox QAbstractItemView {
-    background: #1a1a2e;
+    background: #15173D;
     color: #fff;
-    selection-background-color: #2d3a5a;
+    selection-background-color: #2D2F60;
 }
 QPushButton {
     padding: 10px 20px;
@@ -54,18 +54,18 @@ QPushButton {
     font-weight: 500;
 }
 QPushButton#cancel {
-    background: #2d3a5a;
+    background: #2D2F60;
     color: #fff;
 }
 QPushButton#cancel:hover {
-    background: #3d4a6a;
+    background: #2A2C66;
 }
 QPushButton#confirm {
-    background: #4ecca3;
-    color: #000;
+    background: #982598;
+    color: #15173D;
 }
 QPushButton#confirm:hover {
-    background: #3db892;
+    background: #E491C9;
 }
 """
 
@@ -185,10 +185,10 @@ class MergeDialog(QDialog):
             gap = max(0, max(t_start - s_end, s_start - t_end) - 1)
             if gap > 0:
                 self.gap_label.setText(f"Gap: {gap} frames will be interpolated")
-                self.gap_label.setStyleSheet("color: #f39c12; font-size: 12px;")
+                self.gap_label.setStyleSheet("color: #F1C56B; font-size: 12px;")
             else:
                 self.gap_label.setText("No gap — tracks overlap or are adjacent")
-                self.gap_label.setStyleSheet("color: #4ecca3; font-size: 12px;")
+                self.gap_label.setStyleSheet("color: #982598; font-size: 12px;")
 
     def selected_target_id(self) -> int | None:
         return self.combo.currentData()

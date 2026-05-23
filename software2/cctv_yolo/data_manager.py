@@ -273,6 +273,16 @@ class DataManager(QObject):
                 self.session_map[session_id] = p
                 return p
 
+        # PRD E3-h: batch-registered sessions can live anywhere on disk —
+        # fall back to the persistent batch session map.
+        try:
+            mapped = self._lookup_batch_session(session_id)
+        except Exception:
+            mapped = None
+        if mapped is not None:
+            self.session_map[session_id] = mapped
+            return mapped
+
         return None
 
     # ------------------------------------------------------------------
@@ -791,8 +801,12 @@ class DataManager(QObject):
 
         return exported
 
-    def export_coco(self, session_id: str) -> Path:
-        """Export session data in COCO format. Returns the path to the output file."""
+    def export_coco(self, session_id: str, roi_id: str | None = None) -> Path:
+        """Export session data in COCO format. Returns the path to the output file.
+
+        ``roi_id`` (PRD F3-2): when set, only tracks that pass through the
+        named/id'd ROI are exported.
+        """
         data = self.load_session_data(session_id)
         if data is None:
             raise FileNotFoundError(f"No data for session: {session_id}")
@@ -801,6 +815,9 @@ class DataManager(QObject):
         video_name = video_path.name if video_path else session_id
 
         tracks = data.get("tracks", [])
+        if roi_id:
+            from cctv_yolo.exports import filter_tracks_by_roi
+            tracks = filter_tracks_by_roi(tracks, data.get("rois", []), roi_id)
 
         # Gather all unique classes
         categories = []
@@ -877,7 +894,7 @@ class DataManager(QObject):
             "categories": categories,
         }
 
-        output_dir = self.exports_dir / session_id
+        output_dir = self.exports_dir / session_id / "coco"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / "coco_annotations.json"
         _atomic_write_json(output_file, coco_data)
@@ -1234,3 +1251,108 @@ class DataManager(QObject):
             "n_sessions": len(sessions),
             "n_corrected": n_corrected,
         }
+
+    # ----- Batch (PRD E) -----
+    def build_session_id_for_batch(self, video_path: Path, source_folder: Path) -> str:
+        """Build a globally-unique session_id for a video in any source folder.
+
+        Path-aware so nested files keep their structure in the ID, with an
+        8-char sha256 of the absolute path appended so two files with the
+        same relative name (in different source folders) never collide.
+        """
+        import hashlib
+        video_path = Path(video_path)
+        source_folder = Path(source_folder)
+        try:
+            rel = video_path.relative_to(source_folder)
+            parts = list(rel.parts[:-1]) + [rel.stem]
+        except ValueError:
+            # video isn't inside source_folder — fall back to its stem only
+            parts = [video_path.stem]
+        safe = "--".join(p.replace(" ", "_") for p in parts)
+        safe = re.sub(r"[^a-zA-Z0-9_\-.]", "", safe) or "video"
+        abs_hash = hashlib.sha256(str(video_path.resolve()).encode()).hexdigest()[:8]
+        return f"{safe}--{abs_hash}"
+
+    def _batch_session_map_file(self) -> Path:
+        return self.config_dir / "batch_session_map.json"
+
+    def _load_batch_session_map(self) -> dict:
+        f = self._batch_session_map_file()
+        if not f.exists():
+            return {}
+        try:
+            with open(f, "r") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_batch_session_map(self, data: dict) -> None:
+        _atomic_write_json(self._batch_session_map_file(), data)
+
+    def register_batch_session(self, session_id: str, video_path: Path) -> None:
+        """Record session_id -> absolute video path so get_video_path() can
+        resolve batch-imported videos that live outside ``videos_dir``."""
+        data = self._load_batch_session_map()
+        data[session_id] = str(Path(video_path).resolve())
+        self._save_batch_session_map(data)
+
+    def unregister_batch_session(self, session_id: str) -> None:
+        data = self._load_batch_session_map()
+        if session_id in data:
+            data.pop(session_id, None)
+            self._save_batch_session_map(data)
+
+    def _lookup_batch_session(self, session_id: str) -> Path | None:
+        data = self._load_batch_session_map()
+        raw = data.get(session_id)
+        if not raw:
+            return None
+        p = Path(raw)
+        return p if p.exists() else None
+
+    # ----- Batch (PRD E) -----
+    def _batch_registry_file(self) -> Path:
+        return self.config_dir / "batch_registry.json"
+
+    def load_batch_registry(self) -> dict:
+        """Per-folder UI state ({folders: {path: {...}}, active_folder: path})."""
+        f = self._batch_registry_file()
+        if not f.exists():
+            return {"folders": {}, "active_folder": None}
+        try:
+            with open(f, "r") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                return {"folders": {}, "active_folder": None}
+            data.setdefault("folders", {})
+            data.setdefault("active_folder", None)
+            return data
+        except (json.JSONDecodeError, OSError):
+            return {"folders": {}, "active_folder": None}
+
+    def save_batch_registry(self, data: dict) -> None:
+        _atomic_write_json(self._batch_registry_file(), data)
+
+    # ----- Correction (PRD F) -----
+
+    def get_rois(self, session_id: str) -> list:
+        """Return the ROIs stored in the session's corrections JSON (or tracks
+        JSON if no corrections exist). Empty list if neither file exists.
+        PRD F3-1.
+        """
+        data = self.load_session_data(session_id)
+        if not data:
+            return []
+        return list(data.get("rois", []) or [])
+
+    def count_tracks_in_roi(self, session_id: str, roi_id: str) -> int:
+        """Count tracks whose bbox center falls in the named/id'd ROI on at
+        least one frame. PRD F3-1.
+        """
+        data = self.load_session_data(session_id)
+        if not data:
+            return 0
+        from cctv_yolo.exports import filter_tracks_by_roi
+        return len(filter_tracks_by_roi(data.get("tracks", []), data.get("rois", []), roi_id))
