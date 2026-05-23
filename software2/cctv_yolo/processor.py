@@ -147,9 +147,17 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             f"Original error: {e}"
         ) from e
 
-    # Select best available device (GPU > MPS > CPU)
+    # Select best available device (CUDA > MPS > CPU). GPU is always
+    # used if present — same logic on every platform.
     device = _get_device()
     model.to(device)
+    import logging
+    logging.getLogger(__name__).info(
+        "Model loaded on device: %s (%s)", device,
+        "CUDA NVIDIA GPU" if device.startswith("cuda")
+        else "Apple Metal (MPS)" if device == "mps"
+        else "CPU fallback"
+    )
     print(f"Model loaded on device: {device}")
 
     # Open video
@@ -167,7 +175,10 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
 
     cap.release()
 
-    # Run tracking using Ultralytics built-in tracker
+    # Run tracking using Ultralytics built-in tracker.
+    # Pass device= explicitly so Ultralytics doesn't fall back to CPU even
+    # though model.to(device) was already called. (Some Ultralytics versions
+    # ignore the model's current device on track() unless told.)
     print("Running detection + tracking...")
     results = model.track(
         source=str(video_path),
@@ -175,6 +186,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         classes=list(VEHICLE_CLASSES.keys()),
         tracker="bytetrack.yaml",
         stream=True,
+        device=device,
         verbose=False
     )
 
