@@ -600,8 +600,12 @@ class ModelsTab(QWidget):
 
     # ------------------------------------------------------------------ import / download
     def _import_model(self):
+        # Start at the models folder so the user can see (and avoid
+        # re-importing) what's already installed.
+        models_dir = self.dm.models_dir
+        models_dir.mkdir(parents=True, exist_ok=True)
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import .pt model", "", "YOLO models (*.pt)"
+            self, "Import .pt model", str(models_dir), "YOLO models (*.pt)"
         )
         if not path:
             return

@@ -964,8 +964,11 @@ class AnalyticsTab(QWidget):
     def _export_od_csv(self):
         if not getattr(self, "_last_od_csv", None) or not self._last_od_csv.exists():
             return
+        # Start at the session's exports/ folder so the file lands somewhere
+        # the user can find later via the OpenLocationBar.
+        default = self.dm.exports_dir / self._last_od_csv.name
         target, _ = QFileDialog.getSaveFileName(
-            self, "Save OD matrix CSV", str(self._last_od_csv.name),
+            self, "Save OD matrix CSV", str(default),
             "CSV files (*.csv)",
         )
         if not target:

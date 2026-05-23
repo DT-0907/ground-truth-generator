@@ -388,10 +388,14 @@ class MainWindow(QMainWindow):
 
     def _import_video(self):
         """Import a video file into the local videos directory."""
+        # Start the picker at the videos folder so the user can see what's
+        # already imported (and so they're not picking from random spots).
+        videos_dir = self.data_manager.videos_dir
+        videos_dir.mkdir(parents=True, exist_ok=True)
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Video",
-            "",
+            str(videos_dir),
             "Video Files (*.mp4 *.mov *.avi *.mkv);;All Files (*)",
         )
         if not file_path:
