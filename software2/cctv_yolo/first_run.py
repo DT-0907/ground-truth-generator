@@ -326,11 +326,18 @@ class _ModelDownloadPage(QWizardPage):
             return False
 
         if not state["ok"]:
-            QMessageBox.warning(
+            # Offer Retry — the new downloader resumes from the partial
+            # .pt.tmp file so retries are cheap.
+            resp = QMessageBox.question(
                 self, f"{model_name} download failed",
                 (state["err"] or "Unknown error.")
-                + "\n\nYou can try again later from the Models tab.",
+                + "\n\nRetry now? (Partial file will be resumed.)",
+                QMessageBox.Yes | QMessageBox.No,
             )
+            if resp == QMessageBox.Yes:
+                return self._download_one(
+                    ModelDownloadWorker, model_name, index, total,
+                )
             return False
         return True
 

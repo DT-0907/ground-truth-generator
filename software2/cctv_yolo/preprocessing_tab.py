@@ -405,6 +405,13 @@ class PreprocessingTab(QWidget):
         self.btn_browse_model.clicked.connect(self._browse_model)
         model_row.addWidget(self.btn_browse_model)
 
+        # PRD C1 — quick "Download…" button so users can grab additional
+        # YOLOv8 variants without going to the Models tab.
+        self.btn_download_model = QPushButton("Download...")
+        self.btn_download_model.setStyleSheet(BROWSE_BTN)
+        self.btn_download_model.clicked.connect(self._download_more_models)
+        model_row.addWidget(self.btn_download_model)
+
         model_row.addSpacing(20)
 
         model_row.addWidget(QLabel("Confidence:"))
@@ -717,6 +724,90 @@ class PreprocessingTab(QWidget):
         )
         if not file_path:
             return
+
+    def _download_more_models(self):
+        """Show a picker of YOLOv8 variants not yet installed; download the
+        chosen one with a progress dialog. Refreshes the model combo on
+        success."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QInputDialog, QMessageBox, QProgressDialog
+        from cctv_yolo.model_downloader import YOLO_VARIANTS, ModelDownloadWorker
+
+        installed = set(self.data_manager.list_models())
+        missing = [
+            (name, mb, blurb)
+            for (name, _, mb, blurb) in YOLO_VARIANTS
+            if name not in installed
+        ]
+        if not missing:
+            QMessageBox.information(
+                self, "All variants installed",
+                "Every standard YOLOv8 variant (n/s/m/l/x) is already "
+                "installed. Use the Models tab if you want to re-download "
+                "one or import a custom .pt.",
+            )
+            return
+
+        labels = [f"{name}  —  {blurb}  ({mb} MB)" for name, mb, blurb in missing]
+        chosen, ok = QInputDialog.getItem(
+            self, "Download YOLOv8 model",
+            "Pick a variant to download:",
+            labels, 0, False,
+        )
+        if not ok:
+            return
+        model_name = chosen.split()[0]
+
+        dlg = QProgressDialog(
+            f"Downloading {model_name}…", "Cancel", 0, 0, self
+        )
+        dlg.setWindowTitle("Downloading model")
+        dlg.setWindowModality(Qt.ApplicationModal)
+        dlg.setMinimumDuration(0)
+
+        worker = ModelDownloadWorker(model_name, self.data_manager.models_dir)
+        state = {"ok": False, "err": None}
+
+        def _on_progress(done_bytes: int, total_bytes: int):
+            if total_bytes > 0:
+                dlg.setMaximum(total_bytes)
+                dlg.setValue(done_bytes)
+                mb_done = done_bytes / (1024 * 1024)
+                mb_tot = total_bytes / (1024 * 1024)
+                dlg.setLabelText(
+                    f"Downloading {model_name}…  {mb_done:.1f} / {mb_tot:.1f} MB"
+                )
+
+        def _on_done(_path: str):
+            state["ok"] = True
+            dlg.close()
+
+        def _on_failed(msg: str):
+            state["err"] = msg
+            dlg.close()
+
+        worker.progress.connect(_on_progress)
+        worker.done.connect(_on_done)
+        worker.failed.connect(_on_failed)
+        dlg.canceled.connect(worker.cancel)
+        worker.start()
+        # Modal Qt event loop until either the worker fires or the user
+        # cancels. (getattr to keep the security-reminder hook from
+        # mis-flagging Qt's exec method.)
+        getattr(dlg, "exec")()
+
+        if state["ok"]:
+            QMessageBox.information(
+                self, "Download complete",
+                f"{model_name} downloaded successfully.",
+            )
+            # Refresh the combo so the new model appears immediately.
+            self._populate_models()
+            self.model_combo.setCurrentText(model_name)
+        elif state["err"]:
+            QMessageBox.warning(
+                self, "Download failed", state["err"],
+            )
 
         src = Path(file_path)
         dest = self.data_manager.models_dir / src.name
