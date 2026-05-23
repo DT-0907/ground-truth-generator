@@ -116,9 +116,13 @@ def build_yolo_dataset(
     sample_every_n: int = 5,
     val_split: float = 0.1,
     progress_callback=None,
+    restrict_session_ids: list[str] | None = None,
 ) -> dict:
     """Walk every session that has corrections, sample frames, write
     YOLO-formatted training data.
+
+    PRD J2: ``restrict_session_ids`` filters to a specific set (used by
+    'Build from unused corrections').
 
     Returns
     -------
@@ -140,6 +144,9 @@ def build_yolo_dataset(
 
     sessions = data_manager.get_sessions()
     corrected = [s for s in sessions if s.get("has_corrections")]
+    if restrict_session_ids is not None:
+        keep = set(restrict_session_ids)
+        corrected = [s for s in corrected if s["id"] in keep]
     total = max(1, len(corrected))
 
     images_written = 0
@@ -382,6 +389,8 @@ class DatasetBuildWorker(QThread):
         self.output_root = output_root
         self.sample_every_n = sample_every_n
         self.val_split = val_split
+        # PRD J2: set by training_tab._build_dataset(restrict_to=...) before .start()
+        self._restrict_session_ids: list[str] | None = None
 
     def run(self):
         try:
@@ -391,6 +400,7 @@ class DatasetBuildWorker(QThread):
                 sample_every_n=self.sample_every_n,
                 val_split=self.val_split,
                 progress_callback=lambda p: self.progress.emit(p),
+                restrict_session_ids=self._restrict_session_ids,
             )
             self.finished_ok.emit(stats)
         except Exception as e:

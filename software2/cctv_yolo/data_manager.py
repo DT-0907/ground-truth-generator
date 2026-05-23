@@ -1114,6 +1114,90 @@ class DataManager(QObject):
         all_sessions = {s["id"]: s for s in self.get_sessions()}
         return [all_sessions[sid] for sid in g.get("session_ids", []) if sid in all_sessions]
 
+    # ------------------------------------------------------------------
+    # Training history — drives "Build from unused corrections" (PRD J2)
+    # ------------------------------------------------------------------
+
+    def _training_history_file(self) -> Path:
+        return self.config_dir / "training_history.json"
+
+    def _load_training_history(self) -> dict:
+        f = self._training_history_file()
+        if not f.exists():
+            return {"_version": 1, "history": []}
+        try:
+            with open(f, "r") as fh:
+                return json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            return {"_version": 1, "history": []}
+
+    def list_training_history(self) -> list[dict]:
+        return list(self._load_training_history().get("history", []))
+
+    def get_last_training_build(self) -> dict | None:
+        h = self.list_training_history()
+        return h[-1] if h else None
+
+    def record_training_build(self, build_id: str, trained_model: str | None = None) -> None:
+        """Snapshot the current corrections+tracks mtimes for every session
+        so the next 'unused corrections' build can diff against them.
+        PRD J2.
+        """
+        snapshot = {}
+        for f in self.corrections_dir.glob("*.json"):
+            sid = f.stem
+            try:
+                cmt = f.stat().st_mtime
+            except OSError:
+                cmt = 0
+            tf = self.tracks_dir / f.name
+            try:
+                tmt = tf.stat().st_mtime if tf.exists() else 0
+            except OSError:
+                tmt = 0
+            snapshot[sid] = {"corrections_mtime": cmt, "tracks_mtime": tmt}
+
+        data = self._load_training_history()
+        data["history"].append({
+            "build_id": build_id,
+            "trained_model": trained_model,
+            "built_at": datetime.now().isoformat(),
+            "session_files_at_build": snapshot,
+        })
+        _atomic_write_json(self._training_history_file(), data)
+
+    def list_unused_corrections(self) -> list[dict]:
+        """Return session dicts for sessions whose corrections (or tracks) have
+        been touched since the last training build, or that didn't exist at
+        the last build. PRD J2 — drives the 'Build from unused corrections'
+        button.
+        """
+        last = self.get_last_training_build()
+        snap = last.get("session_files_at_build", {}) if last else {}
+        all_sessions = {s["id"]: s for s in self.get_sessions()}
+
+        result = []
+        for sid, s in all_sessions.items():
+            if not s.get("has_corrections"):
+                continue
+            cf = self.corrections_dir / f"{sid}.json"
+            tf = self.tracks_dir / f"{sid}.json"
+            try:
+                cmt = cf.stat().st_mtime if cf.exists() else 0
+                tmt = tf.stat().st_mtime if tf.exists() else 0
+            except OSError:
+                continue
+            ref = snap.get(sid)
+            if ref is None:
+                # New since last build
+                result.append({**s, "_reason": "new"})
+            elif cmt > ref.get("corrections_mtime", 0):
+                result.append({**s, "_reason": "corrected"})
+            elif tmt > ref.get("tracks_mtime", 0):
+                # Re-processed: tracks newer than at last build
+                result.append({**s, "_reason": "reprocessed"})
+        return result
+
     def get_group_stats(self, group_id: str) -> dict:
         """Aggregate stats across every session in a group.
 

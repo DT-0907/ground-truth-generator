@@ -467,21 +467,23 @@ class PreprocessingTab(QWidget):
         frame.setObjectName("statCard")
         frame.setStyleSheet(STAT_CARD_STYLE)
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setFixedHeight(95)
+        frame.setFixedHeight(110)
 
         vbox = QVBoxLayout(frame)
-        vbox.setContentsMargins(16, 12, 16, 12)
+        vbox.setContentsMargins(16, 10, 16, 14)
+        vbox.setSpacing(2)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #8899aa; font-size: 11px; letter-spacing: 1px; border: none;")
-        lbl.setAlignment(Qt.AlignLeft)
+        lbl.setStyleSheet(f"color: {TEXT}; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
+        lbl.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        lbl.setFixedHeight(18)
 
         val = QLabel(value_text)
-        val.setStyleSheet(f"color: {ACCENT}; font-size: 36px; font-weight: bold; border: none;")
-        val.setAlignment(Qt.AlignLeft)
+        val.setStyleSheet(f"color: {ACCENT}; font-size: 32px; font-weight: bold; border: none; background: transparent;")
+        val.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         vbox.addWidget(lbl)
-        vbox.addWidget(val)
+        vbox.addWidget(val, stretch=1)
 
         return {"frame": frame, "value_label": val}
 

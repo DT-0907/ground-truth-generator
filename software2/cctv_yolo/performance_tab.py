@@ -41,13 +41,17 @@ from cctv_yolo.theme import (
 )
 
 STAT_CARD_STYLE = f"""
-QFrame {{
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b2844, stop:1 {PANEL});
+QFrame#statCard {{
+    background-color: {PANEL};
     border: 1px solid {BORDER};
     border-top: 2px solid {ACCENT};
     border-radius: 8px;
     padding: 12px;
+}}
+QFrame#statCard QLabel {{
+    background: transparent;
+    border: none;
+    padding: 0;
 }}
 """
 
@@ -319,36 +323,43 @@ class PerformanceTab(QWidget):
         self.content_layout.addStretch()
 
     def _make_stat_card(self, label_text, value_text, color=None):
-        """Create a stat card with visible labels on gradient background."""
+        """Create a stat card with visible labels (object-name-scoped style)."""
         accent = color or ACCENT
         frame = QFrame()
-        style = f"""
-        QFrame {{
-            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #1b2844, stop:1 {PANEL});
+        frame.setObjectName("statCard")
+        # Per-card top-border color via dynamic style
+        frame.setStyleSheet(f"""
+        QFrame#statCard {{
+            background-color: {PANEL};
             border: 1px solid {BORDER};
             border-top: 2px solid {accent};
             border-radius: 8px;
             padding: 12px;
         }}
-        """
-        frame.setStyleSheet(style)
+        QFrame#statCard QLabel {{
+            background: transparent;
+            border: none;
+            padding: 0;
+        }}
+        """)
         frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setFixedHeight(95)
+        frame.setFixedHeight(110)
 
         vbox = QVBoxLayout(frame)
-        vbox.setContentsMargins(16, 12, 16, 12)
+        vbox.setContentsMargins(16, 10, 16, 14)
+        vbox.setSpacing(2)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #aabbcc; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
-        lbl.setAlignment(Qt.AlignLeft)
+        lbl.setStyleSheet(f"color: {TEXT}; font-size: 11px; letter-spacing: 1px;")
+        lbl.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        lbl.setFixedHeight(18)
 
         val = QLabel(value_text)
-        val.setStyleSheet(f"color: {accent}; font-size: 36px; font-weight: bold; border: none; background: transparent;")
-        val.setAlignment(Qt.AlignLeft)
+        val.setStyleSheet(f"color: {accent}; font-size: 32px; font-weight: bold;")
+        val.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         vbox.addWidget(lbl)
-        vbox.addWidget(val)
+        vbox.addWidget(val, stretch=1)
 
         return {"frame": frame, "value_label": val}
 
