@@ -195,6 +195,56 @@ def main() -> int:
     dm.delete_group(g1)
     dm.delete_group(g2)
 
+    # 11. Safe class-color lookup (regression: KeyError 'unknown' bug)
+    from cctv_yolo.theme import class_color, CLASS_COLORS
+    check("class_color('unknown') doesn't raise",
+          class_color("unknown") == CLASS_COLORS["unknown"])
+    check("class_color(None) doesn't raise",
+          class_color(None) == CLASS_COLORS["unknown"])
+    check("class_color('totally_unknown_class') doesn't raise",
+          class_color("zebra") == CLASS_COLORS["unknown"])
+    check("class_color('CAR') (wrong case) resolves",
+          class_color("CAR") == CLASS_COLORS["car"])
+
+    # 12. Required deps importable (regression: matplotlib missing on Windows)
+    required = ("ultralytics", "matplotlib", "matplotlib.pyplot",
+                "yaml", "PIL", "cv2", "torch", "PySide6")
+    missing_required = []
+    for dep in required:
+        try:
+            __import__(dep)
+        except ImportError as e:
+            missing_required.append(f"{dep} ({e})")
+    check("Required deps importable",
+          not missing_required,
+          ", ".join(missing_required) or "all present")
+
+    # 13. Recommended deps (Ultralytics transitive — non-fatal on dev
+    # machines without a full venv re-install, but ALL must be present
+    # in PyInstaller-bundled builds)
+    recommended = ("scipy", "pandas", "psutil", "seaborn")
+    missing_rec = []
+    for dep in recommended:
+        try:
+            __import__(dep)
+        except ImportError:
+            missing_rec.append(dep)
+    if missing_rec:
+        # Print as a warning, not a failure — local venv may not have
+        # them yet but the build script ensures the .exe / .app does.
+        print(f"[ WARN ] Recommended deps missing locally: {missing_rec}")
+        print(f"         (Pip install them or re-run build_*.sh / .bat;")
+        print(f"         the spec ensures the frozen build has all of them.)")
+
+    # 13. processor.py imports cleanly (catches Ultralytics submodule
+    # import-cascade regressions like the matplotlib one)
+    try:
+        from cctv_yolo import processor  # noqa: F401
+        proc_ok, proc_err = True, ""
+    except Exception as e:
+        proc_ok, proc_err = False, str(e)
+    check("cctv_yolo.processor imports cleanly", proc_ok, proc_err)
+
     # Cleanup
     dm.delete_group(gid)
 

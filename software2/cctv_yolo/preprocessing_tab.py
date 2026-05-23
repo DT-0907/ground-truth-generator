@@ -1122,7 +1122,11 @@ class PreprocessingTab(QWidget):
 
         # Name + badge row
         name_row = QHBoxLayout()
-        name_lbl = QLabel(video.get("display_name", video["name"]))
+        # Defensive: "name" can be missing if the video dict came from a
+        # corrupted scan. Fall back to display_name -> name -> "(unnamed)".
+        name_lbl = QLabel(
+            video.get("display_name") or video.get("name") or "(unnamed)"
+        )
         name_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {TEXT};")
         name_lbl.setWordWrap(True)
         name_row.addWidget(name_lbl, stretch=1)
