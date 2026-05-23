@@ -660,30 +660,33 @@ class PreprocessingTab(QWidget):
     # ------------------------------------------------------------------
 
     def _populate_models(self):
-        """Fill the model combo box with available models."""
+        """Fill the model combo box with available models.
+
+        Only models actually present in the models/ folder are listed —
+        otherwise the dropdown was misleading (it showed all 5 yolov8
+        variants even when only one or two were downloaded, and selecting
+        a non-existent one made ultralytics try to auto-download mid-job).
+
+        If the user has nothing installed, the combo shows a single
+        "(no models — click Browse or use the Models tab)" placeholder.
+        """
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
 
-        # Built-in model names (these will be auto-downloaded by ultralytics)
-        builtin = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"]
+        installed = self.data_manager.list_models()
 
-        # Scan the models dir for custom .pt files
-        custom_models = self.data_manager.list_models()
-
-        # Combine: builtin first, then any custom ones not already listed
-        all_models = list(builtin)
-        for m in custom_models:
-            if m not in all_models:
-                all_models.append(m)
-
-        self.model_combo.addItems(all_models)
-
-        # Restore last-used model
-        last_model = self.data_manager.get_last_model()
-        if last_model and last_model in all_models:
-            self.model_combo.setCurrentText(last_model)
+        if installed:
+            self.model_combo.addItems(installed)
+            last_model = self.data_manager.get_last_model()
+            if last_model and last_model in installed:
+                self.model_combo.setCurrentText(last_model)
+            elif "yolov8m.pt" in installed:
+                self.model_combo.setCurrentText("yolov8m.pt")
+            else:
+                self.model_combo.setCurrentIndex(0)
         else:
-            self.model_combo.setCurrentText("yolov8m.pt")
+            self.model_combo.addItem("(no models installed)")
+            self.model_combo.setCurrentIndex(0)
 
         self.model_combo.blockSignals(False)
         # Update meta label for the current selection (signals were blocked)
@@ -697,11 +700,19 @@ class PreprocessingTab(QWidget):
         self._update_model_metadata(model_name)
 
     def _browse_model(self):
-        """Open a file dialog to select a custom .pt model file."""
+        """Open a file dialog to select a custom .pt model file.
+
+        Opens at the app's models/ folder so the user can see what's
+        already installed by the wizard / Models tab download. Falls back
+        to the home folder if the models dir hasn't been created yet.
+        """
+        models_dir = self.data_manager.models_dir
+        models_dir.mkdir(parents=True, exist_ok=True)
+        start_dir = str(models_dir) if models_dir.exists() else str(Path.home())
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select YOLO Model",
-            "",
+            start_dir,
             "PyTorch Models (*.pt);;All Files (*)",
         )
         if not file_path:
