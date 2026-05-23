@@ -94,6 +94,12 @@ class ModelsTab(QWidget):
         btn_import.clicked.connect(self._import_model)
         action_col.addWidget(btn_import)
 
+        # PRD C1 / K2-6 — bootstrap downloader so a fresh install has a model.
+        btn_download = QPushButton("Download YOLOv8…")
+        btn_download.setStyleSheet(ACTION_BTN)
+        btn_download.clicked.connect(self._download_model)
+        action_col.addWidget(btn_download)
+
         action_col.addStretch()
         list_layout.addLayout(action_col)
 
@@ -232,6 +238,95 @@ class ModelsTab(QWidget):
         import shutil
         shutil.copy2(src, dest)
         self.refresh()
+
+    def _download_model(self):
+        """PRD C1 / K2-6 — bootstrap downloader. Ultralytics auto-downloads
+        any standard yolov8*.pt on first construction, so we just instantiate
+        the chosen variant and let it fetch."""
+        from PySide6.QtWidgets import QInputDialog
+        variants = [
+            "yolov8n.pt  (6 MB · fastest)",
+            "yolov8s.pt  (22 MB · balanced)",
+            "yolov8m.pt  (52 MB · recommended)",
+            "yolov8l.pt  (87 MB · accurate)",
+            "yolov8x.pt  (136 MB · most accurate)",
+        ]
+        choice, ok = QInputDialog.getItem(
+            self, "Download YOLOv8 model",
+            "Which model would you like to download?\n"
+            "(Downloaded once, cached in ~/Documents/CCTV-YOLO/models/)",
+            variants, 0, False,
+        )
+        if not ok:
+            return
+        model_name = choice.split()[0]  # e.g. "yolov8n.pt"
+        dest = self.dm.models_dir / model_name
+        if dest.exists():
+            QMessageBox.information(
+                self, "Already installed",
+                f"{model_name} is already in your models folder."
+            )
+            return
+
+        # Run the download in a worker so the UI doesn't freeze.
+        from PySide6.QtCore import QThread, Signal as _Signal
+
+        class _DLWorker(QThread):
+            done = _Signal(str)
+            failed = _Signal(str)
+
+            def __init__(self, model_name, dest_dir):
+                super().__init__()
+                self.model_name = model_name
+                self.dest_dir = dest_dir
+
+            def run(self):
+                try:
+                    from ultralytics import YOLO
+                    import shutil
+                    # YOLO() auto-downloads the .pt the first time it's used
+                    m = YOLO(self.model_name)
+                    src = Path(m.ckpt_path) if hasattr(m, "ckpt_path") and m.ckpt_path else None
+                    if src is None or not src.exists():
+                        # Fallback: ultralytics caches downloads in cwd
+                        src = Path(self.model_name)
+                    if not src.exists():
+                        self.failed.emit(f"Downloaded but couldn't locate {self.model_name}")
+                        return
+                    dest = self.dest_dir / self.model_name
+                    if src.resolve() != dest.resolve():
+                        shutil.copy2(src, dest)
+                    self.done.emit(str(dest))
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    self.failed.emit(str(e))
+
+        # Show progress dialog
+        from PySide6.QtWidgets import QProgressDialog
+        progress = QProgressDialog(
+            f"Downloading {model_name}…\n(This can take a minute.)",
+            None, 0, 0, self
+        )
+        progress.setWindowTitle("Downloading model")
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)
+        progress.show()
+
+        self._dl_worker = _DLWorker(model_name, self.dm.models_dir)
+        def _ok(path):
+            progress.close()
+            QMessageBox.information(
+                self, "Download complete",
+                f"{model_name} saved to:\n{path}"
+            )
+            self.refresh()
+        def _fail(msg):
+            progress.close()
+            QMessageBox.critical(self, "Download failed", msg)
+        self._dl_worker.done.connect(_ok)
+        self._dl_worker.failed.connect(_fail)
+        self._dl_worker.start()
 
     def _run_compare(self):
         sid = self.video_combo.currentData()
