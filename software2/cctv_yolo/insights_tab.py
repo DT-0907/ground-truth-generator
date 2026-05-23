@@ -58,6 +58,7 @@ from cctv_yolo.theme import (
     PINK,
     PURPLE,
     TEXT_MUTED,
+    YELLOW,
 )
 from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 
@@ -317,7 +318,7 @@ class _PanelTrio(QWidget):
         self.dh_warnings.setMaximumBlockCount(200)
         self.dh_warnings.setMaximumHeight(140)
         self.dh_warnings.setStyleSheet(
-            f"QPlainTextEdit {{ background-color: #1E2050; color: #F1C56B; "
+            f"QPlainTextEdit {{ background-color: {PANEL}; color: {YELLOW}; "
             f"border: 1px solid {BORDER}; }}"
         )
         dh_layout.addWidget(self.dh_warnings)

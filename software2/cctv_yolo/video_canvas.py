@@ -15,6 +15,8 @@ from cctv_yolo.theme import (
     OFFWHITE as THEME_OFFWHITE,
     BORDER as THEME_BORDER,
     INDIGO as THEME_INDIGO,
+    # Unaliased names exposed so f-string interpolation can reference them.
+    INDIGO, OFFWHITE, PURPLE, PINK, BORDER,
 )
 
 
@@ -107,7 +109,7 @@ class VideoCanvas(QWidget):
         self._drag_start_video = None    # (vx, vy) start of drag in video coords
         self._drag_preview_bbox = None   # live preview bbox in video coords
 
-        self.setStyleSheet("background-color: #15173D;")
+        self.setStyleSheet(f"background-color: {INDIGO};")
 
     # ------------------------------------------------------------------
     # Video I/O
@@ -426,7 +428,7 @@ class VideoCanvas(QWidget):
                 if is_interpolated:
                     label_bg.setAlpha(170)
                 painter.fillRect(QRectF(sx1, sy1 - text_h, text_w, text_h), label_bg)
-                painter.setPen(QColor("#15173D"))
+                painter.setPen(QColor(INDIGO))
                 painter.drawText(QPointF(sx1 + 4, sy1 - 4), label)
 
     def _paint_rois(self, painter, fm, text_h):
@@ -484,7 +486,7 @@ class VideoCanvas(QWidget):
                 label_bg = QColor(roi_color)
                 label_bg.setAlpha(200)
                 painter.fillRect(QRectF(cx1, cy1 - text_h, tw, text_h), label_bg)
-                painter.setPen(QColor("#15173D"))
+                painter.setPen(QColor(INDIGO))
                 painter.drawText(QPointF(cx1 + 4, cy1 - 4), name)
                 painter.setPen(pen)
 
@@ -508,7 +510,7 @@ class VideoCanvas(QWidget):
                 label_bg = QColor(roi_color)
                 label_bg.setAlpha(200)
                 painter.fillRect(QRectF(first_cx, first_cy - text_h, tw, text_h), label_bg)
-                painter.setPen(QColor("#15173D"))
+                painter.setPen(QColor(INDIGO))
                 painter.drawText(QPointF(first_cx + 4, first_cy - 4), name)
                 painter.setPen(pen)
 
@@ -516,7 +518,7 @@ class VideoCanvas(QWidget):
         """Draw shapes currently being drawn by the user."""
         # Rectangle drag (draw_box or roi_rect)
         if self._is_drawing and self._draw_start and self._draw_end:
-            pen = QPen(QColor("#fff"), 2, Qt.DashLine)
+            pen = QPen(QColor(OFFWHITE), 2, Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             x = min(self._draw_start[0], self._draw_end[0])
@@ -527,14 +529,14 @@ class VideoCanvas(QWidget):
 
         # Polygon in-progress
         if self.drawing_mode == "roi_polygon" and self._polygon_points:
-            pen = QPen(QColor("#fff"), 2, Qt.DashLine)
+            pen = QPen(QColor(OFFWHITE), 2, Qt.DashLine)
             painter.setPen(pen)
             for i in range(len(self._polygon_points) - 1):
                 p1 = self._polygon_points[i]
                 p2 = self._polygon_points[i + 1]
                 painter.drawLine(QPointF(p1[0], p1[1]), QPointF(p2[0], p2[1]))
             # Draw dots at vertices
-            painter.setBrush(QColor("#fff"))
+            painter.setBrush(QColor(OFFWHITE))
             for p in self._polygon_points:
                 painter.drawEllipse(QPointF(p[0], p[1]), 4, 4)
             painter.setBrush(Qt.NoBrush)

@@ -50,6 +50,8 @@ from cctv_yolo.theme import (
     PINK,
     OFFWHITE as TEXT,
     TEXT_MUTED,
+    INDIGO,
+    OFFWHITE,
 )
 
 
@@ -74,13 +76,13 @@ QFrame#videoCard {{
 }}
 QFrame#videoCard:hover {{
     border: 1px solid {PINK};
-    background-color: #1E2050;
+    background-color: ;
 }}
 """
 
 CARD_SELECTED_STYLE = f"""
 QFrame#videoCard {{
-    background-color: #1E2050;
+    background-color: ;
     border: 2px solid {ACCENT};
     border-radius: 8px;
 }}
@@ -89,7 +91,7 @@ QFrame#videoCard {{
 ROI_BTN_ACTIVE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 4px 10px;
@@ -185,7 +187,7 @@ QComboBox QAbstractItemView {{
     color: {TEXT};
     border: 1px solid {BORDER};
     selection-background-color: {ACCENT};
-    selection-color: #15173D;
+    selection-color: ;
 }}
 """
 
@@ -896,7 +898,7 @@ class PreprocessingTab(QWidget):
         if self._current_roi:
             roi_display = dict(self._current_roi)
             roi_display["name"] = "Processing ROI"
-            roi_display["color"] = "#E491C9"
+            roi_display["color"] = PINK
             self.preview_canvas.rois = [roi_display]
         else:
             self.preview_canvas.rois = []
@@ -981,7 +983,7 @@ class PreprocessingTab(QWidget):
         thumb_label.setFixedHeight(160)
         thumb_label.setAlignment(Qt.AlignCenter)
         thumb_label.setStyleSheet(
-            "background-color: #15173D; border-radius: 8px 8px 0 0; border: none;"
+            f"background-color: {INDIGO}; border-radius: 8px 8px 0 0; border: none;"
         )
 
         video_path = self.data_manager.get_video_path(session_id)
@@ -999,13 +1001,13 @@ class PreprocessingTab(QWidget):
             else:
                 thumb_label.setText("No Preview")
                 thumb_label.setStyleSheet(
-                    "background-color: #15173D; border-radius: 8px 8px 0 0;"
+                    f"background-color: {INDIGO}; border-radius: 8px 8px 0 0;"
                     " border: none; color: #555; font-size: 14px;"
                 )
         else:
             thumb_label.setText("No Video")
             thumb_label.setStyleSheet(
-                "background-color: #15173D; border-radius: 8px 8px 0 0;"
+                f"background-color: {INDIGO}; border-radius: 8px 8px 0 0;"
                 " border: none; color: #444; font-size: 14px; font-style: italic;"
             )
         vbox.addWidget(thumb_label)

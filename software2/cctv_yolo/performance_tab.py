@@ -68,6 +68,9 @@ from cctv_yolo.theme import (
     RADIUS,
     ROI_COLOR_ROTATION,
     TEXT_MUTED,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 from cctv_yolo.video_canvas import VideoCanvas
 from cctv_yolo.widgets.collapsible_section import CollapsibleSection

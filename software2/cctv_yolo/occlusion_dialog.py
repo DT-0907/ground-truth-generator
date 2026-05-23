@@ -29,20 +29,25 @@ from cctv_yolo.occlusion import find_gap_candidates
 
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    PINK,
+    TEXT_MUTED,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 ACTION_BTN = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 6px 14px;
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #E491C9; }}
-QPushButton:disabled {{ background-color: {BORDER}; color: #A89BA8; }}
+QPushButton:hover {{ background-color: ; }}
+QPushButton:disabled {{ background-color: {BORDER}; color: ; }}
 """
 
 

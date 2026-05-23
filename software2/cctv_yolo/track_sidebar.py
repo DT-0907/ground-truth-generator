@@ -101,9 +101,9 @@ class TrackItem(QFrame):
         is_visible = (current_frame >= start and current_frame <= end)
         needs_review = track.get("needs_review", False)
 
-        bg = "#2A2C66" if is_selected else ("#1E2050" if is_visible else "#15173D")
-        border = "2px solid #982598" if is_selected else "2px solid transparent"
-        left_border = "border-left: 3px solid #F1C56B;" if needs_review else ""
+        bg = PANEL_HI if is_selected else (PANEL if is_visible else INDIGO)
+        border = f"2px solid {PURPLE}" if is_selected else "2px solid transparent"
+        left_border = f"border-left: 3px solid {YELLOW};" if needs_review else ""
 
         self.setStyleSheet(f"""
             QFrame {{
@@ -114,7 +114,7 @@ class TrackItem(QFrame):
                 margin-bottom: 3px;
                 {left_border}
             }}
-            QFrame:hover {{ background: #2A2C66; }}
+            QFrame:hover {{ background: ; }}
             QLabel {{ background: transparent; border: none; }}
         """)
 
@@ -134,7 +134,7 @@ class TrackItem(QFrame):
         class_label = QLabel(class_name.upper())
         class_label.setStyleSheet(f"""
             background: {class_color};
-            color: {'#15173D' if class_name == 'motorcycle' else '#fff'};
+            color: {INDIGO if class_name == 'motorcycle' else OFFWHITE};
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 11px;
@@ -215,26 +215,26 @@ class TrackSidebar(QWidget):
 
         # --- Header ---
         header = QWidget()
-        header.setStyleSheet("background: #1E2050; border-bottom: 1px solid #2D2F60; padding: 15px;")
+        header.setStyleSheet(f"background: {PANEL}; border-bottom: 1px solid {BORDER}; padding: 15px;")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(15, 15, 15, 15)
         self._track_count_label = QLabel("Tracks (0)")
         self._track_count_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         header_layout.addWidget(self._track_count_label)
         self._unsaved_label = QLabel("*unsaved")
-        self._unsaved_label.setStyleSheet("color: #F1C56B; font-size: 12px;")
+        self._unsaved_label.setStyleSheet(f"color: {YELLOW}; font-size: 12px;")
         self._unsaved_label.hide()
         header_layout.addWidget(self._unsaved_label)
         header_layout.addStretch()
         back_btn = QPushButton("Back")
-        back_btn.setStyleSheet("background: transparent; color: #982598; font-size: 13px;")
+        back_btn.setStyleSheet(f"background: transparent; color: {PURPLE}; font-size: 13px;")
         back_btn.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(back_btn)
         layout.addWidget(header)
 
         # --- Filters ---
         filter_widget = QWidget()
-        filter_widget.setStyleSheet("background: #1E2050; border-bottom: 1px solid #2D2F60;")
+        filter_widget.setStyleSheet(f"background: {PANEL}; border-bottom: 1px solid {BORDER};")
         filter_layout = QHBoxLayout(filter_widget)
         filter_layout.setContentsMargins(15, 10, 15, 10)
         filter_layout.setSpacing(6)
@@ -242,9 +242,9 @@ class TrackSidebar(QWidget):
         for name in ["all", "visible", "review", "car", "truck", "bus"]:
             btn = QPushButton(name.capitalize())
             btn.setStyleSheet("""
-                QPushButton { padding: 4px 8px; border: 1px solid #2D2F60; border-radius: 4px;
+                QPushButton { padding: 4px 8px; border: 1px solid ; border-radius: 4px;
                               background: transparent; color: #888; font-size: 11px; }
-                QPushButton:hover { border-color: #982598; color: #982598; }
+                QPushButton:hover { border-color: ; color: ; }
             """)
             btn.clicked.connect(lambda checked, n=name: self._on_filter(n))
             self._filter_buttons[name] = btn
@@ -271,7 +271,7 @@ class TrackSidebar(QWidget):
 
         # --- ROI Panel ---
         roi_widget = QWidget()
-        roi_widget.setStyleSheet("border-top: 1px solid #2D2F60; padding: 10px 15px;")
+        roi_widget.setStyleSheet(f"border-top: 1px solid {BORDER}; padding: 10px 15px;")
         roi_layout = QVBoxLayout(roi_widget)
         roi_layout.setContentsMargins(15, 10, 15, 10)
         roi_header = QHBoxLayout()
@@ -290,7 +290,7 @@ class TrackSidebar(QWidget):
 
         # --- Actions ---
         actions_widget = QWidget()
-        actions_widget.setStyleSheet("border-top: 1px solid #2D2F60;")
+        actions_widget.setStyleSheet(f"border-top: 1px solid {BORDER};")
         actions_layout = QVBoxLayout(actions_widget)
         actions_layout.setContentsMargins(15, 15, 15, 15)
         actions_layout.setSpacing(8)
@@ -341,7 +341,7 @@ class TrackSidebar(QWidget):
         )
         shortcuts.setStyleSheet(
             "font-size: 10px; color: #555; padding: 10px 15px; "
-            "border-top: 1px solid #2D2F60; line-height: 1.6;"
+            f"border-top: 1px solid {BORDER}; line-height: 1.6;"
         )
         shortcuts.setWordWrap(True)
         layout.addWidget(shortcuts)
@@ -377,14 +377,14 @@ class TrackSidebar(QWidget):
         for name, btn in self._filter_buttons.items():
             if name == self._current_filter:
                 btn.setStyleSheet("""
-                    QPushButton { padding: 4px 8px; border: 1px solid #982598; border-radius: 4px;
-                                  background: transparent; color: #982598; font-size: 11px; }
+                    QPushButton { padding: 4px 8px; border: 1px solid ; border-radius: 4px;
+                                  background: transparent; color: ; font-size: 11px; }
                 """)
             else:
                 btn.setStyleSheet("""
-                    QPushButton { padding: 4px 8px; border: 1px solid #2D2F60; border-radius: 4px;
+                    QPushButton { padding: 4px 8px; border: 1px solid ; border-radius: 4px;
                                   background: transparent; color: #888; font-size: 11px; }
-                    QPushButton:hover { border-color: #982598; color: #982598; }
+                    QPushButton:hover { border-color: ; color: ; }
                 """)
 
     # ------------------------------------------------------------------
@@ -535,9 +535,9 @@ class TrackSidebar(QWidget):
         """Create a QFrame widget for a single ROI entry with a selection checkbox."""
         frame = QFrame()
         is_selected = roi_index in self._selected_roi_indices
-        border_style = f"border: 1px solid {roi.get('color', '#E491C9')};" if is_selected else ""
+        border_style = f"border: 1px solid {roi.get('color', PINK)};" if is_selected else ""
         frame.setStyleSheet(
-            f"background: #15173D; border-radius: 4px; padding: 6px 8px; margin-bottom: 2px; {border_style}"
+            f"background: {INDIGO}; border-radius: 4px; padding: 6px 8px; margin-bottom: 2px; {border_style}"
         )
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -556,7 +556,7 @@ class TrackSidebar(QWidget):
         color_dot = QLabel()
         color_dot.setFixedSize(10, 10)
         color_dot.setStyleSheet(
-            f"background: {roi.get('color', '#E491C9')}; border-radius: 2px;"
+            f"background: {roi.get('color', PINK)}; border-radius: 2px;"
         )
         layout.addWidget(color_dot)
 
@@ -571,7 +571,7 @@ class TrackSidebar(QWidget):
         rename_btn = QPushButton("edit")
         rename_btn.setFixedSize(30, 20)
         rename_btn.setStyleSheet(
-            "background: transparent; color: #982598; font-size: 10px; padding: 0;"
+            f"background: transparent; color: {PURPLE}; font-size: 10px; padding: 0;"
         )
         rename_btn.setToolTip("Rename this ROI")
         rename_btn.clicked.connect(lambda checked=False, idx=roi_index: self._on_roi_rename(idx))
@@ -580,7 +580,7 @@ class TrackSidebar(QWidget):
         color_btn = QPushButton("color")
         color_btn.setFixedSize(34, 20)
         color_btn.setStyleSheet(
-            "background: transparent; color: #982598; font-size: 10px; padding: 0;"
+            f"background: transparent; color: {PURPLE}; font-size: 10px; padding: 0;"
         )
         color_btn.setToolTip("Change ROI color")
         color_btn.clicked.connect(lambda checked=False, idx=roi_index: self._on_roi_recolor(idx))
@@ -589,7 +589,7 @@ class TrackSidebar(QWidget):
         del_btn = QPushButton("x")
         del_btn.setFixedSize(20, 20)
         del_btn.setStyleSheet(
-            "background: transparent; color: #FF6B7A; font-size: 14px; padding: 0;"
+            f"background: transparent; color: {ERROR}; font-size: 14px; padding: 0;"
         )
         del_btn.clicked.connect(lambda checked=False, idx=roi_index: self._on_roi_delete(idx))
         layout.addWidget(del_btn)

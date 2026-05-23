@@ -57,6 +57,8 @@ from cctv_yolo.training_history import (
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
     PINK, ERROR, TEXT_MUTED, INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 ACTION_BTN = f"""
@@ -446,7 +448,7 @@ class TrainingTab(QWidget):
         f = QFont("Menlo", 11)
         self.log.setFont(f)
         self.log.setStyleSheet(
-            f"QPlainTextEdit {{ background-color: #15173D; color: {TEXT}; "
+            f"QPlainTextEdit {{ background-color: {INDIGO}; color: {TEXT}; "
             f"border: 1px solid {BORDER}; }}"
         )
         ds_layout.addWidget(self.log, stretch=1)

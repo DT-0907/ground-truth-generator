@@ -79,7 +79,7 @@ QPushButton {{
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #FF6B7A; }}
+QPushButton:hover {{ background-color: ; }}
 QPushButton:disabled {{ background-color: {BORDER}; color: {TEXT_MUTED}; }}
 """
 
@@ -131,7 +131,7 @@ class LiveCanvas(QLabel):
         super().__init__(parent)
         self.setMinimumSize(640, 360)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet(f"background-color: #15173D; border: 1px solid {BORDER};")
+        self.setStyleSheet(f"background-color: {INDIGO}; border: 1px solid {BORDER};")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
 
@@ -207,7 +207,7 @@ class LiveCanvas(QLabel):
 
     def paintEvent(self, e):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#15173D"))
+        painter.fillRect(self.rect(), QColor(INDIGO))
         if self._pixmap and not self._pixmap.isNull():
             scaled = self._pixmap.scaled(
                 self._display_rect.size(),

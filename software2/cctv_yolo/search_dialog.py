@@ -33,19 +33,23 @@ from cctv_yolo.visual_search import VisualIndex
 
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    PINK,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 ACTION_BTN = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 6px 14px;
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{ background-color: #E491C9; }}
+QPushButton:hover {{ background-color: ; }}
 """
 
 

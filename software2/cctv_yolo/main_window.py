@@ -44,6 +44,8 @@ from cctv_yolo.review_window import ReviewWindow
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
     PINK, INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 STYLE = f"""
@@ -64,7 +66,7 @@ QStatusBar {{
 MODE_BADGE_LOCAL = f"""
 QLabel {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border-radius: 10px;
     padding: 4px 14px;
     font-weight: bold;

@@ -21,6 +21,13 @@ from PySide6.QtWidgets import (
 # ---------------------------------------------------------------------------
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
+    ERROR,
+    PINK,
+    TEXT_MUTED,
+    YELLOW,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 
@@ -28,13 +35,13 @@ CARD_STYLE_REVIEW = f"""
 QFrame {{
     background-color: {PANEL};
     border: 1px solid {BORDER};
-    border-left: 3px solid #F1C56B;
+    border-left: 3px solid ;
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1E2050;
-    border: 1px solid #2D2F60;
-    border-left: 3px solid #F1C56B;
+    background-color: ;
+    border: 1px solid ;
+    border-left: 3px solid ;
 }}
 """
 
@@ -46,8 +53,8 @@ QFrame {{
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1E2050;
-    border: 1px solid #2D2F60;
+    background-color: ;
+    border: 1px solid ;
     border-left: 3px solid {ACCENT};
 }}
 """
@@ -60,8 +67,8 @@ QFrame {{
     border-radius: 8px;
 }}
 QFrame:hover {{
-    background-color: #1E2050;
-    border: 1px solid #2D2F60;
+    background-color: ;
+    border: 1px solid ;
     border-left: 3px solid {BORDER};
 }}
 """
@@ -69,7 +76,7 @@ QFrame:hover {{
 STAT_CARD_STYLE = f"""
 QFrame {{
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1E2050, stop:1 {PANEL});
+        stop:0 , stop:1 {PANEL});
     border: 1px solid {BORDER};
     border-top: 2px solid {ACCENT};
     border-radius: 8px;
@@ -79,7 +86,7 @@ QFrame {{
 
 BADGE_REVIEW = f"""
 QLabel {{
-    background-color: #FF6B7A;
+    background-color: ;
     color: white;
     border-radius: 4px;
     padding: 2px 8px;
@@ -91,7 +98,7 @@ QLabel {{
 BADGE_CORRECTED = f"""
 QLabel {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 11px;
@@ -101,7 +108,7 @@ QLabel {{
 
 BADGE_MISSING = f"""
 QLabel {{
-    background-color: #A89BA8;
+    background-color: ;
     color: white;
     border-radius: 4px;
     padding: 2px 8px;
@@ -113,7 +120,7 @@ QLabel {{
 REVIEW_BTN_STYLE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 6px 16px;
@@ -121,10 +128,10 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #E491C9;
+    background-color: ;
 }}
 QPushButton:pressed {{
-    background-color: #E491C9;
+    background-color: ;
 }}
 """
 
@@ -145,7 +152,7 @@ QPushButton:hover {{
 FILTER_BTN_ACTIVE = f"""
 QPushButton {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 5px 14px;
@@ -153,7 +160,7 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #E491C9;
+    background-color: ;
 }}
 """
 
@@ -173,8 +180,8 @@ QPushButton:hover {{
 
 NEXT_REVIEW_BTN = f"""
 QPushButton {{
-    background-color: #F1C56B;
-    color: #15173D;
+    background-color: ;
+    color: ;
     border: none;
     border-radius: 4px;
     padding: 6px 16px;
@@ -182,11 +189,11 @@ QPushButton {{
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: #F1C56B;
+    background-color: ;
 }}
 QPushButton:disabled {{
     background-color: {BORDER};
-    color: #A89BA8;
+    color: ;
 }}
 """
 
@@ -309,7 +316,7 @@ class CorrectionTab(QWidget):
         vbox.setContentsMargins(16, 12, 16, 12)
 
         lbl = QLabel(label_text.upper())
-        lbl.setStyleSheet("color: #A89BA8; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
+        lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; letter-spacing: 1px; border: none; background: transparent;")
         lbl.setAlignment(Qt.AlignLeft)
 
         val = QLabel(value_text)

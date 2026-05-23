@@ -65,6 +65,9 @@ from cctv_yolo.theme import (
     OFFWHITE as TEXT,
     TEXT_MUTED,
     ERROR,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 

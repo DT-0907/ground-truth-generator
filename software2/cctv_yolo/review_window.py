@@ -52,6 +52,11 @@ from cctv_yolo.widgets.open_location_bar import OpenLocationBar
 from cctv_yolo.theme import (
     INDIGO as BG, PANEL, BORDER, PURPLE as ACCENT, OFFWHITE as TEXT,
     roi_color as theme_roi_color,
+    PINK,
+    TEXT_MUTED,
+    INDIGO,
+    OFFWHITE,
+    PURPLE,
 )
 
 STYLE = f"""
@@ -84,7 +89,7 @@ QToolBar QToolButton:hover {{
 }}
 QToolBar QToolButton:checked {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
     font-weight: bold;
 }}
 QPushButton {{
@@ -97,22 +102,22 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #1E2050;
-    border-color: #2D2F60;
+    background-color: ;
+    border-color: ;
 }}
 QPushButton:pressed {{
     background-color: {ACCENT};
-    color: #15173D;
+    color: ;
 }}
 QSlider::groove:horizontal {{
-    background: #15173D;
+    background: ;
     height: 6px;
     border-radius: 3px;
     border: 1px solid {BORDER};
 }}
 QSlider::sub-page:horizontal {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #E491C9, stop:1 {ACCENT});
+        stop:0 , stop:1 {ACCENT});
     border-radius: 3px;
 }}
 QSlider::handle:horizontal {{
@@ -121,14 +126,14 @@ QSlider::handle:horizontal {{
     height: 14px;
     margin: -5px 0;
     border-radius: 7px;
-    border: 2px solid #E491C9;
+    border: 2px solid ;
 }}
 QSlider::handle:horizontal:hover {{
-    background: #E491C9;
+    background: ;
     border: 2px solid {ACCENT};
 }}
 QSpinBox {{
-    background-color: #15173D;
+    background-color: ;
     color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: 6px;
@@ -151,8 +156,8 @@ QStatusBar {{
 
 PLAY_BTN_PLAYING = f"""
 QPushButton {{
-    background-color: #E491C9;
-    color: #15173D;
+    background-color: ;
+    color: ;
     border: 1px solid {ACCENT};
     border-radius: 6px;
     padding: 5px 12px;
@@ -176,8 +181,8 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #1E2050;
-    border-color: #2D2F60;
+    background-color: ;
+    border-color: ;
 }}
 """
 
@@ -409,7 +414,7 @@ class ReviewWindow(QMainWindow):
 
         self.lbl_frame_info = QLabel("Frame 0 / 0")
         self.lbl_frame_info.setMinimumWidth(150)
-        self.lbl_frame_info.setStyleSheet(f"color: #A89BA8; font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace;")
+        self.lbl_frame_info.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace;")
 
         frame_layout.addWidget(self.btn_play)
         frame_layout.addWidget(self.btn_step_back)
@@ -1157,7 +1162,7 @@ class ReviewWindow(QMainWindow):
         """Pick a new color for an ROI (PRD F3-1)."""
         if not (0 <= roi_index < len(self.rois)):
             return
-        current = QColor(self.rois[roi_index].get("color", "#F1E9E9"))
+        current = QColor(self.rois[roi_index].get("color", OFFWHITE))
         new_color = QColorDialog.getColor(current, self, "Choose ROI color")
         if not new_color.isValid():
             return

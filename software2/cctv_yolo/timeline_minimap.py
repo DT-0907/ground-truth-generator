@@ -13,6 +13,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QWidget
+from cctv_yolo.theme import INDIGO
 
 
 CLASS_COLORS = {
@@ -69,7 +70,7 @@ class TimelineMinimap(QWidget):
         w = self.width()
         h = self.height()
         # Background
-        p.fillRect(self.rect(), QColor("#15173D"))
+        p.fillRect(self.rect(), QColor(INDIGO))
 
         if not self._tracks or w < 4:
             self._draw_playhead(p)

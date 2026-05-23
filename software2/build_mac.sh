@@ -1,48 +1,151 @@
 #!/bin/bash
 # ============================================================
 #  Build CCTV-YOLO v2 (Native) for macOS
-#  Output: dist/CCTV-YOLO.dmg
+#  Output: dist/CCTV-YOLO.dmg + dist/CCTV-YOLO.app
 # ============================================================
 #
-# NOTE: this script must run under the SAME Python architecture you want
-# the app to ship in. On Apple Silicon, use `arch -arm64 /opt/homebrew/bin/python3`
-# (or your installed python may secretly be x86_64 via Rosetta, which produces
-# a wrong-arch bundle that crashes on first launch).
-# Check with:
-#     python3 -c "import platform; print(platform.machine())"
-# arm64 = native Apple Silicon, x86_64 = Intel/Rosetta.
+# Notes:
 #
+#   - First build takes ~5-15 minutes (depends on whether dependencies are
+#     already cached). Subsequent builds reuse build_venv/ and finish in
+#     about 2-3 minutes.
+#
+#   - This script reuses the existing build_venv/ if present. To force a
+#     clean rebuild, `rm -rf build_venv/ dist/` before running.
+#
+#   - On Apple Silicon (M1/M2/M3), the python3 you invoke must be the native
+#     arm64 build, NOT x86_64-via-Rosetta. Otherwise the bundle will run on
+#     Intel only and crash on first launch under Apple Silicon. The script
+#     warns if it detects this mismatch.
+#
+#   - Apple MPS (Metal) GPU acceleration is enabled automatically at runtime
+#     via torch.backends.mps. No special install needed.
+#
+
 set -e
+set -o pipefail
+
+# Always print a final summary, even on errors, so users running this in a
+# terminal see what stage failed.
+BUILD_STATUS="unknown"
+trap 'on_exit' EXIT
+
+on_exit() {
+    local code=$?
+    echo ""
+    echo "=========================================="
+    if [ "$BUILD_STATUS" = "success" ]; then
+        echo "  Build complete!"
+        echo "=========================================="
+        echo ""
+        echo "  DMG : $(pwd)/dist/CCTV-YOLO.dmg"
+        echo "  APP : $(pwd)/dist/CCTV-YOLO.app"
+        echo ""
+        echo "Opening the dist/ folder in Finder now..."
+        open "$(pwd)/dist" 2>/dev/null || true
+        echo ""
+        echo "To install:"
+        echo "  1. Double-click dist/CCTV-YOLO.dmg"
+        echo "  2. Drag CCTV-YOLO to Applications"
+        echo "  3. Launch from Applications"
+        echo "  4. Data will be created at ~/Documents/CCTV-YOLO/"
+    else
+        echo "  Build FAILED (stage: $BUILD_STATUS, exit code: $code)"
+        echo "=========================================="
+        echo ""
+        echo "Scroll up to see the error message. Common fixes:"
+        echo "  - Make sure python3 is the arm64 native version (Apple Silicon):"
+        echo "      python3 -c 'import platform; print(platform.machine())'"
+        echo "    arm64 = native, x86_64 = Intel/Rosetta (wrong arch)."
+        echo "  - Delete build_venv/ and re-run for a fresh install:"
+        echo "      rm -rf build_venv/ dist/"
+        echo "  - Confirm you have ~5 GB free disk space for the build_venv + dist."
+    fi
+    echo ""
+}
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+echo ""
 echo "=========================================="
 echo "  Building CCTV-YOLO v2 (Native) for macOS"
 echo "=========================================="
+echo ""
+echo "This takes 2-15 minutes depending on whether deps are cached."
+echo ""
 
-# 1. Create / activate a virtual environment
+# ---- arch sanity check -----------------------------------------------
+HOST_ARCH="$(uname -m)"
+PY_ARCH="$(python3 -c 'import platform; print(platform.machine())' 2>/dev/null || echo unknown)"
+echo "Host architecture       : $HOST_ARCH"
+echo "python3 architecture    : $PY_ARCH"
+if [ "$HOST_ARCH" = "arm64" ] && [ "$PY_ARCH" = "x86_64" ]; then
+    echo ""
+    echo "  WARNING: you're on Apple Silicon but python3 is x86_64 (Rosetta)."
+    echo "           The resulting .app will only run under Rosetta and"
+    echo "           torch MPS acceleration will not work."
+    echo "           Recommended: install python3 via the official"
+    echo "           https://www.python.org/downloads/ installer or via"
+    echo "           Homebrew (brew install python@3.12) and re-run."
+    echo ""
+    echo "           Continuing anyway in 5 seconds. Ctrl-C to abort."
+    sleep 5
+fi
+echo ""
+
+# ---- 1. venv ----------------------------------------------------------
+BUILD_STATUS="venv"
 if [ ! -d "build_venv" ]; then
     echo "[1/5] Creating virtual environment..."
     python3 -m venv build_venv
+else
+    echo "[1/5] Reusing existing build_venv/"
 fi
+# shellcheck disable=SC1091
 source build_venv/bin/activate
 
-# 2. Install dependencies
+# ---- 2. dependencies --------------------------------------------------
+BUILD_STATUS="dependencies"
+echo ""
 echo "[2/5] Installing dependencies..."
-pip install --upgrade pip -q
-pip install -r requirements.txt -q
+echo "  - Upgrading pip..."
+pip install --upgrade pip
+echo ""
+echo "  - Installing requirements (torch, PySide6, ultralytics, opencv, etc.)..."
+echo "    This is the long step. Progress bars will appear below."
+pip install -r requirements.txt
 
-# 3. Run PyInstaller
-echo "[3/5] Running PyInstaller..."
+# Verify pyinstaller is reachable (it's in requirements.txt; this catches
+# venv-activation snafus).
+if ! command -v pyinstaller >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: pyinstaller is not on PATH after dependency install."
+    echo "  Delete build_venv/ and re-run this script."
+    exit 1
+fi
+
+# ---- 3. PyInstaller ---------------------------------------------------
+BUILD_STATUS="pyinstaller"
+echo ""
+echo "[3/5] Running PyInstaller (5-10 minutes)..."
 pyinstaller cctv_yolo.spec --clean --noconfirm
 
-# 4. Create DMG
+if [ ! -d "dist/CCTV-YOLO.app" ]; then
+    echo ""
+    echo "ERROR: PyInstaller finished but dist/CCTV-YOLO.app is missing."
+    echo "  Check cctv_yolo.spec and the warn-*.txt file in build/."
+    exit 1
+fi
+
+# ---- 4. DMG packaging -------------------------------------------------
+BUILD_STATUS="dmg"
+echo ""
 echo "[4/5] Creating DMG..."
 DMG_DIR="dist/dmg_staging"
 rm -rf "$DMG_DIR"
 mkdir -p "$DMG_DIR"
-cp -r "dist/CCTV-YOLO.app" "$DMG_DIR/"
+cp -R "dist/CCTV-YOLO.app" "$DMG_DIR/"
 ln -s /Applications "$DMG_DIR/Applications"
 
 rm -f "dist/CCTV-YOLO.dmg"
@@ -54,19 +157,10 @@ hdiutil create \
 
 rm -rf "$DMG_DIR"
 
-# 5. Done
+# ---- 5. done ----------------------------------------------------------
+BUILD_STATUS="cleanup"
+echo ""
 echo "[5/5] Cleaning up..."
 deactivate 2>/dev/null || true
 
-echo ""
-echo "=========================================="
-echo "  Build complete!"
-echo "  DMG: dist/CCTV-YOLO.dmg"
-echo "  APP: dist/CCTV-YOLO.app"
-echo "=========================================="
-echo ""
-echo "To install:"
-echo "  1. Open dist/CCTV-YOLO.dmg"
-echo "  2. Drag CCTV-YOLO to Applications"
-echo "  3. Launch from Applications"
-echo "  4. Data will be created at ~/Documents/CCTV-YOLO/"
+BUILD_STATUS="success"

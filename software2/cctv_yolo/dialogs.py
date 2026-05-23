@@ -4,6 +4,7 @@ Dialog windows for track operations — class change, merge, new track, ROI name
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                 QComboBox, QPushButton, QLineEdit, QFormLayout)
 from PySide6.QtCore import Qt
+from cctv_yolo.theme import BORDER, INDIGO, OFFWHITE, PANEL, PANEL_HI, PINK, PURPLE, YELLOW
 
 VEHICLE_CLASSES = ["car", "truck", "bus", "motorcycle", "bicycle"]
 
@@ -20,31 +21,31 @@ VEHICLE_SUBCLASSES = {
 # Dark theme stylesheet for dialogs
 DIALOG_STYLE = """
 QDialog {
-    background: #1E2050;
+    background: ;
     color: #eee;
 }
 QLabel {
     color: #eee;
 }
 QComboBox, QLineEdit {
-    background: #15173D;
-    color: #fff;
-    border: 1px solid #2D2F60;
+    background: ;
+    color: ;
+    border: 1px solid ;
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 14px;
 }
 QComboBox:focus, QLineEdit:focus {
-    border-color: #982598;
+    border-color: ;
 }
 QComboBox::drop-down {
     border: none;
     padding-right: 8px;
 }
 QComboBox QAbstractItemView {
-    background: #15173D;
-    color: #fff;
-    selection-background-color: #2D2F60;
+    background: ;
+    color: ;
+    selection-background-color: ;
 }
 QPushButton {
     padding: 10px 20px;
@@ -54,18 +55,18 @@ QPushButton {
     font-weight: 500;
 }
 QPushButton#cancel {
-    background: #2D2F60;
-    color: #fff;
+    background: ;
+    color: ;
 }
 QPushButton#cancel:hover {
-    background: #2A2C66;
+    background: ;
 }
 QPushButton#confirm {
-    background: #982598;
-    color: #15173D;
+    background: ;
+    color: ;
 }
 QPushButton#confirm:hover {
-    background: #E491C9;
+    background: ;
 }
 """
 
@@ -185,10 +186,10 @@ class MergeDialog(QDialog):
             gap = max(0, max(t_start - s_end, s_start - t_end) - 1)
             if gap > 0:
                 self.gap_label.setText(f"Gap: {gap} frames will be interpolated")
-                self.gap_label.setStyleSheet("color: #F1C56B; font-size: 12px;")
+                self.gap_label.setStyleSheet(f"color: {YELLOW}; font-size: 12px;")
             else:
                 self.gap_label.setText("No gap — tracks overlap or are adjacent")
-                self.gap_label.setStyleSheet("color: #982598; font-size: 12px;")
+                self.gap_label.setStyleSheet(f"color: {PURPLE}; font-size: 12px;")
 
     def selected_target_id(self) -> int | None:
         return self.combo.currentData()
