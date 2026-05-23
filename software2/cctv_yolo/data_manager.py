@@ -17,12 +17,14 @@ class DataManager:
     """Centralized data access — no HTTP, direct file operations."""
 
     def __init__(self):
-        # Use "CCTV-YOLO-Data" (not "CCTV-YOLO") so the data folder can't
-        # collide with a clone of this project on macOS's case-insensitive
-        # filesystem (~/Documents/CCTV-YOLO/ and ~/Documents/cctv-yolo/
-        # resolve to the same directory — which silently merged the app's
-        # data dir with the source repo and surfaced stale files).
-        self._data_root = Path.home() / "Documents" / "CCTV-YOLO-Data"
+        # On macOS the case-insensitive filesystem deliberately makes
+        # ~/Documents/CCTV-YOLO/ resolve to the project repo at
+        # ~/Documents/cctv-yolo/ — that's the intended dev-mode layout
+        # (data/ + config/ + models/ live inside the repo). On Windows
+        # the same path is just a fresh user folder. open_folder("data")
+        # below opens the inner data/ subfolder so the user lands on
+        # videos/tracks/corrections/exports directly.
+        self._data_root = Path.home() / "Documents" / "CCTV-YOLO"
         self._init_dirs()
 
         # Active directories (switch between local and NAS)
