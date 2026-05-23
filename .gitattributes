@@ -1,0 +1,33 @@
+# Enforce line endings so the Windows build script doesn't silently get
+# converted to LF on macOS/Linux checkouts (which crashes cmd.exe on
+# launch with no useful error).
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Shell scripts and most source must stay LF.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.md        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+*.txt       text eol=lf
+
+# Inno Setup scripts are Windows-only.
+*.iss       text eol=crlf
+
+# Binary — never touch.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.ico       binary
+*.icns      binary
+*.pt        binary
+*.dmg       binary
+*.zip       binary
+*.mp4       binary
+*.mov       binary
+*.avi       binary
+*.mkv       binary
