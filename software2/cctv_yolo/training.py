@@ -49,7 +49,16 @@ def session_review_priority(track_data: dict) -> dict:
     """
     tracks = track_data.get("tracks", [])
     if not tracks:
-        return {"score": 1.0, "tracks": 0, "low_conf": 0, "short": 0}
+        # All keys present so callers can always look them up — empty session
+        # is high-priority for review (score 1.0).
+        return {
+            "score": 1.0,
+            "tracks": 0,
+            "low_conf": 0,
+            "short": 0,
+            "needs_review": 0,
+            "mean_conf": 0.0,
+        }
 
     confs = []
     short = 0
