@@ -17,7 +17,12 @@ class DataManager:
     """Centralized data access — no HTTP, direct file operations."""
 
     def __init__(self):
-        self._data_root = Path.home() / "Documents" / "CCTV-YOLO"
+        # Use "CCTV-YOLO-Data" (not "CCTV-YOLO") so the data folder can't
+        # collide with a clone of this project on macOS's case-insensitive
+        # filesystem (~/Documents/CCTV-YOLO/ and ~/Documents/cctv-yolo/
+        # resolve to the same directory — which silently merged the app's
+        # data dir with the source repo and surfaced stale files).
+        self._data_root = Path.home() / "Documents" / "CCTV-YOLO-Data"
         self._init_dirs()
 
         # Active directories (switch between local and NAS)
@@ -497,7 +502,11 @@ class DataManager:
         import subprocess
 
         folder_map = {
-            "data": self._data_root,
+            # "data" lands on the inner data/ folder (videos + tracks +
+            # corrections + exports) — that's what users mean by "data".
+            # config/ and models/ live one level up at _data_root.
+            "data": self.data_dir,
+            "root": self._data_root,
             "videos": self.videos_dir,
             "tracks": self.tracks_dir,
             "corrections": self.corrections_dir,
