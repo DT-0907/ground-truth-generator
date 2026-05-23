@@ -1034,16 +1034,31 @@ class DataManager(QObject):
 
     def create_group(self, name: str, color: str | None = None,
                      description: str = "") -> str:
-        """Create a new group. Returns its id."""
+        """Create a new group. Returns its id.
+
+        If the name already exists, " (2)", " (3)" etc. is appended so
+        combo boxes can disambiguate visually. The id is slug-ified from
+        the (possibly-suffixed) name; on slug collision a short random
+        suffix is added as a last resort.
+        """
         from cctv_yolo.theme import ROI_COLOR_ROTATION
         data = self._load_groups_raw()
-        # Slug-ify the name for a human-readable id, append a short random
-        # suffix if collision.
+
+        # Auto-disambiguate display name on collision: "Snow" + "Snow (2)" + ...
+        existing_names = {g.get("name", "").strip().lower()
+                          for g in data["groups"]}
+        if name.strip().lower() in existing_names:
+            n = 2
+            while f"{name} ({n})".lower() in existing_names:
+                n += 1
+            name = f"{name} ({n})"
+
+        # Slug-ify (possibly-suffixed) name for the id.
         import uuid
         base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name.lower()).strip("_") or "group"
-        existing = {g["id"] for g in data["groups"]}
+        existing_ids = {g["id"] for g in data["groups"]}
         gid = base
-        if gid in existing:
+        if gid in existing_ids:
             gid = f"{base}_{uuid.uuid4().hex[:6]}"
         if not color:
             # Cycle through palette for visual distinction
