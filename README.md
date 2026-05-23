@@ -46,14 +46,13 @@ Cross-cutting:
 - **Help → About** shows version, platform, data + log folder shortcuts.
 - **Help → Show Log Folder** opens `~/Documents/CCTV-YOLO/logs/` (rotating 5 MB × 5 file handler).
 
-Storage layout — **portable**: all runtime files live in the **same folder
-as the app**, not a separate location. Move/copy the folder, your work
-comes with it.
+Storage layout — **portable**: all runtime files live inside a folder named
+`cctv-yolo/`, separate from where the `.exe`/`.app` is installed. Move that
+folder anywhere (Documents → Desktop → external drive) and the app finds it
+again automatically.
 
 ```
-<install-folder>/                  ← the repo root in dev mode, or
-                                     the folder containing CCTV-YOLO.exe
-                                     / CCTV-YOLO.app in a frozen build
+<cctv-yolo data folder>/
 ├── data/
 │   ├── videos/                    raw input videos
 │   ├── tracks/                    YOLO detection + ByteTrack output JSON
@@ -72,11 +71,19 @@ comes with it.
 
 Resolution rules (`cctv_yolo/paths.py`):
 
-1. `$CCTV_YOLO_DATA_DIR` env var → explicit override
-2. Frozen build → the folder containing the exe / .app
-3. Source mode → the repo root (parent of `software2/`)
-4. Fallback if the above is read-only (e.g. installed under
-   `C:\Program Files\`) → `~/Documents/cctv-yolo/`
+1. `$CCTV_YOLO_DATA_DIR` env var → explicit override (highest priority)
+2. Path remembered from last launch (stored in the OS app-config dir, NOT
+   in the data folder — so it survives moves and deletes):
+   - macOS  : `~/Library/Application Support/CCTV-YOLO/data_root.txt`
+   - Windows: `%APPDATA%\CCTV-YOLO\data_root.txt`
+   - Linux  : `~/.config/CCTV-YOLO/data_root.txt`
+3. Source mode (`python run.py` from the working tree) → the repo root
+4. Auto-detect: first existing folder named `cctv-yolo` (or `CCTV-YOLO`) in
+   `~/Documents/`, `~/Desktop/`, or `~/`
+5. Default: create `~/Documents/cctv-yolo/`
+
+The `.exe` / `.app` itself can live in `C:\Program Files\`, `/Applications/`,
+or any portable location — data is decoupled from the binary location.
 
 ## Quick start (dev)
 

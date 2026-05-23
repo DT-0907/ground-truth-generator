@@ -43,6 +43,60 @@ echo.
 
 cd /d "%~dp0"
 
+REM ---------- 0. Long-path-support check + workarounds ----------
+REM
+REM Modern PyTorch + PyInstaller produce paths like
+REM   build_venv\Lib\site-packages\torch\lib\cudnn_cnn_train64_8.dll
+REM which combined with a deep project path (especially under OneDrive)
+REM regularly exceeds Windows' MAX_PATH (260 chars) limit and crashes pip
+REM with: "does not have Windows long path support enabled".
+REM
+REM We work around this two ways:
+REM   1. Check whether LongPathsEnabled is set in the registry. If not,
+REM      print one-line, copy-paste-able instructions to enable it.
+REM   2. Force pip + PyInstaller caches into SHORT %TEMP% subfolders so
+REM      relative paths under them stay well under 260 chars.
+
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled 2>nul | findstr /R /C:"0x1" >nul
+if errorlevel 1 (
+    echo.
+    echo WARNING: Windows Long Path support is NOT enabled on this system.
+    echo          pip and PyInstaller can fail when extracting deep paths
+    echo          like torch/cuda DLLs.
+    echo.
+    echo Recommended fix ^(one-time, requires Administrator + reboot^):
+    echo.
+    echo   Open PowerShell ^(Admin^) and run:
+    echo     New-ItemProperty -Path ^"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem^" `
+    echo         -Name LongPathsEnabled -PropertyType DWord -Value 1 -Force
+    echo   then reboot.
+    echo.
+    echo Alternatively in an Admin Command Prompt:
+    echo     reg add ^"HKLM\SYSTEM\CurrentControlSet\Control\FileSystem^" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+    echo     then reboot.
+    echo.
+    echo Continuing with short-path workarounds. If pip still fails with a
+    echo path-length error, enable long paths first and try again.
+    echo.
+)
+
+REM Sanity check: warn if the project path itself is long. Anything past
+REM ~120 chars leaves little headroom for nested torch/cuda paths.
+call :strlen PROJECT_PATH_LEN "%CD%"
+if !PROJECT_PATH_LEN! GTR 120 (
+    echo.
+    echo WARNING: Project path is !PROJECT_PATH_LEN! characters long:
+    echo            %CD%
+    echo          PyInstaller can hit MAX_PATH limits with deep wheels.
+    echo          If the build fails, move this folder to a shorter path
+    echo          ^(e.g. C:\cctv-yolo\^) and re-run.
+    echo.
+)
+
+REM Short pip cache dir keeps wheel extract paths short.
+set "PIP_CACHE_DIR=%TEMP%\pc"
+if not exist "%PIP_CACHE_DIR%" mkdir "%PIP_CACHE_DIR%" 2>nul
+
 REM ---------- 1. Virtual environment ----------
 if not exist "build_venv" (
     echo [1/5] Creating virtual environment...
@@ -250,14 +304,18 @@ if "%BUILD_STATUS%"=="success" (
     start "" "%CD%\dist\CCTV-YOLO"
     echo.
     echo To run on this machine: double-click CCTV-YOLO.exe inside that folder.
-    echo To share: copy the entire dist\CCTV-YOLO\ folder to another machine.
+    echo To share: copy the entire dist\CCTV-YOLO\ folder to another machine
+    echo   ^(or use the Inno Setup installer: iscc installer_windows.iss^).
     echo.
     echo Data location:
-    echo   All videos / tracks / corrections / models / logs are stored IN
-    echo   THE SAME FOLDER as the .exe -- so the install is portable. Just
-    echo   copy the dist\CCTV-YOLO\ folder anywhere to move everything together.
-    echo   Override with the CCTV_YOLO_DATA_DIR env var if you want a different
-    echo   location.
+    echo   All videos / tracks / corrections / models / logs live in a
+    echo   separate, portable folder named cctv-yolo\. On first launch the
+    echo   app searches %%USERPROFILE%%\Documents\cctv-yolo,
+    echo   %%USERPROFILE%%\Desktop\cctv-yolo, and %%USERPROFILE%%\cctv-yolo.
+    echo   If none exists, it creates %%USERPROFILE%%\Documents\cctv-yolo\.
+    echo   You can move that folder anywhere later -- the app will find it
+    echo   again automatically ^(remembered in %%APPDATA%%\CCTV-YOLO\data_root.txt^).
+    echo   Override with the CCTV_YOLO_DATA_DIR env var anytime.
     echo.
     echo If CCTV-YOLO.exe will not open, run CCTV-YOLO-debug.bat instead --
     echo it captures the real startup error to startup-output.log.
@@ -278,3 +336,19 @@ echo.
 echo Press any key to close this window...
 pause >nul
 exit /b %BUILD_EXIT_CODE%
+
+
+REM ---------- helper subroutine: string length ----------
+REM Usage: call :strlen <result_var_name> <string>
+:strlen
+setlocal enabledelayedexpansion
+set "_s=%~2"
+set "_len=0"
+:_strlen_loop
+if defined _s (
+    set "_s=!_s:~1!"
+    set /a "_len+=1"
+    goto :_strlen_loop
+)
+endlocal & set "%~1=%_len%"
+goto :eof

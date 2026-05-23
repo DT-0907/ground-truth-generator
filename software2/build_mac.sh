@@ -46,16 +46,18 @@ on_exit() {
         echo ""
         echo "To install:"
         echo "  1. Double-click dist/CCTV-YOLO.dmg"
-        echo "  2. Drag CCTV-YOLO to a folder of your choice (Applications or"
-        echo "     a portable location)"
+        echo "  2. Drag CCTV-YOLO to Applications (or anywhere)"
         echo "  3. Launch CCTV-YOLO"
         echo ""
         echo "Data location:"
-        echo "  All videos / tracks / corrections / models / logs are stored"
-        echo "  IN THE SAME FOLDER as the .app — so the install is portable."
-        echo "  Just copy the .app's parent folder to move everything together."
-        echo "  Override with the CCTV_YOLO_DATA_DIR env var if you want a"
-        echo "  different location."
+        echo "  All videos / tracks / corrections / models / logs live in a"
+        echo "  separate, portable folder named cctv-yolo/. On first launch"
+        echo "  the app searches ~/Documents/cctv-yolo, ~/Desktop/cctv-yolo,"
+        echo "  and ~/cctv-yolo. If none exists, it creates ~/Documents/cctv-yolo/."
+        echo "  You can move that folder anywhere later — the app will find"
+        echo "  it again automatically (the chosen path is remembered in"
+        echo "  ~/Library/Application Support/CCTV-YOLO/data_root.txt)."
+        echo "  Override with the CCTV_YOLO_DATA_DIR env var anytime."
     else
         echo "  Build FAILED (stage: $BUILD_STATUS, exit code: $code)"
         echo "=========================================="
@@ -145,10 +147,30 @@ if [ ! -d "dist/CCTV-YOLO.app" ]; then
     exit 1
 fi
 
+# Strip macOS extended attributes from the built .app. PyInstaller's
+# Python interpreter / dylibs sometimes inherit quarantine xattrs from
+# the source pip cache, which makes Gatekeeper refuse to launch the .app
+# on other machines with "damaged and can't be opened".
+echo ""
+echo "[3.5/5] Stripping extended attributes from the .app..."
+xattr -cr "dist/CCTV-YOLO.app" 2>/dev/null || true
+
 # ---- 4. DMG packaging -------------------------------------------------
 BUILD_STATUS="dmg"
 echo ""
 echo "[4/5] Creating DMG..."
+
+# Free disk check — hdiutil silently fails when /tmp or dist/ can't hold
+# the staged .app + the compressed image.
+APP_SIZE_KB=$(du -sk "dist/CCTV-YOLO.app" | awk '{print $1}')
+NEEDED_KB=$(( APP_SIZE_KB * 3 ))  # staging + dmg + slack
+FREE_KB=$(df -k . | awk 'NR==2 {print $4}')
+if [ "$FREE_KB" -lt "$NEEDED_KB" ]; then
+    echo "ERROR: only ${FREE_KB} KB free, need ~${NEEDED_KB} KB for DMG."
+    echo "  Free some disk space and re-run, or skip the DMG step."
+    exit 1
+fi
+
 DMG_DIR="dist/dmg_staging"
 rm -rf "$DMG_DIR"
 mkdir -p "$DMG_DIR"
@@ -156,11 +178,19 @@ cp -R "dist/CCTV-YOLO.app" "$DMG_DIR/"
 ln -s /Applications "$DMG_DIR/Applications"
 
 rm -f "dist/CCTV-YOLO.dmg"
-hdiutil create \
+if ! hdiutil create \
     -volname "CCTV-YOLO" \
     -srcfolder "$DMG_DIR" \
     -ov -format UDZO \
-    "dist/CCTV-YOLO.dmg"
+    "dist/CCTV-YOLO.dmg"; then
+    echo ""
+    echo "ERROR: hdiutil failed to create the DMG."
+    echo "  Common causes: stale mount with the same volname, low disk,"
+    echo "  or filesystem doesn't support APFS sparse images."
+    echo "  Try: hdiutil detach /Volumes/CCTV-YOLO 2>/dev/null; re-run."
+    rm -rf "$DMG_DIR"
+    exit 1
+fi
 
 rm -rf "$DMG_DIR"
 
