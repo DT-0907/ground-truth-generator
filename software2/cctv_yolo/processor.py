@@ -32,32 +32,21 @@ class BatchCancelled(Exception):
 def _get_device():
     """Detect the best available device: CUDA GPU, Apple MPS, or CPU.
 
-    Cross-platform behavior:
-      - Windows w/ NVIDIA: CUDA (fastest)        — requires CUDA-enabled torch
-                                                    (see build_windows.bat)
-      - Apple Silicon Mac: MPS (Metal)           — built into PyTorch
-      - Intel Mac:         CPU
-      - Linux w/ NVIDIA:   CUDA
-      - Anywhere else:     CPU
+    Delegates to ``gpu_info.detect_device`` so logs, the About dialog,
+    and the status-bar banner all tell the same story (and the same
+    "why CPU?" explanation when CUDA isn't usable).
     """
-    import logging
-    _log = logging.getLogger(__name__)
-    if torch.cuda.is_available():
-        count = torch.cuda.device_count()
-        name = torch.cuda.get_device_name(0)
-        msg = f"CUDA GPU detected: {name} ({count} device(s))"
-        print(msg)
-        _log.info(msg)
-        return "cuda:0"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    from cctv_yolo.gpu_info import detect_device
+    info = detect_device()
+    if info.device.startswith("cuda"):
+        msg = f"CUDA GPU detected: {info.label}"
+    elif info.device == "mps":
         msg = "Apple MPS (Metal) detected"
-        print(msg)
-        _log.info(msg)
-        return "mps"
-    msg = "No GPU detected, using CPU"
+    else:
+        msg = f"No GPU in use, falling back to CPU. {info.reason}".rstrip()
     print(msg)
-    _log.info(msg)
-    return "cpu"
+    logger.info(msg)
+    return info.device
 
 
 # COCO vehicle class IDs

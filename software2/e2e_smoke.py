@@ -245,6 +245,25 @@ def main() -> int:
         proc_ok, proc_err = False, str(e)
     check("cctv_yolo.processor imports cleanly", proc_ok, proc_err)
 
+    # 13b. gpu_info.detect_device returns a sensible record. Regression
+    # against the case where a Windows user reports "GPU detected by
+    # nvidia-smi but app runs CPU" with no diagnostic.
+    try:
+        from cctv_yolo.gpu_info import detect_device, short_summary
+        info = detect_device()
+        gpu_ok = info.device in ("cuda:0", "mps", "cpu")
+        gpu_has_reason = (info.device == "cpu") == bool(info.reason)
+        check("gpu_info.detect_device returns one of cuda:0/mps/cpu",
+              gpu_ok, f"device={info.device}")
+        check("gpu_info explains *why* on CPU fallback",
+              gpu_has_reason,
+              f"device={info.device}, reason={info.reason!r}")
+        check("gpu_info short_summary non-empty",
+              bool(short_summary(info)),
+              short_summary(info))
+    except Exception as e:
+        check("gpu_info module loads", False, str(e))
+
     # 14. Every text-mode open() in cctv_yolo/ specifies encoding=
     # (regression: on Windows, default cp1252 bombs on UTF-8 JSON)
     import re

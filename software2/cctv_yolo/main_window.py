@@ -161,6 +161,24 @@ class MainWindow(QMainWindow):
         self.mode_badge.setStyleSheet(MODE_BADGE_LOCAL)
         self.status.addPermanentWidget(self.mode_badge)
 
+        # GPU/CUDA indicator — surfaced at startup so users don't have to
+        # run a video to discover they're on CPU. Clicking opens About,
+        # which has the full diagnostic including the "why CPU" reason.
+        from cctv_yolo.gpu_info import detect_device, short_summary
+        dev = detect_device()
+        self.gpu_badge = QLabel(short_summary(dev))
+        is_gpu = dev.device.startswith("cuda") or dev.device == "mps"
+        self.gpu_badge.setStyleSheet(
+            "padding:2px 8px; border-radius:6px; "
+            + ("background:#1b3b1b; color:#7fd97f;" if is_gpu
+               else "background:#3b1b1b; color:#f0a0a0;")
+        )
+        self.gpu_badge.setToolTip(
+            (dev.label if is_gpu else f"CPU mode — {dev.reason}")
+            + "\n\nFor details: Help → About"
+        )
+        self.status.addPermanentWidget(self.gpu_badge)
+
         self.status.showMessage("Ready")
 
     # ------------------------------------------------------------------

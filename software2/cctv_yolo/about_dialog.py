@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from cctv_yolo.__version__ import __version__, __app_name__
+from cctv_yolo.gpu_info import detect_device
 from cctv_yolo.paths import get_log_file
 from cctv_yolo.theme import (
     INDIGO, PANEL, BORDER, PURPLE, PINK, OFFWHITE, TEXT_MUTED, RADIUS,
@@ -56,10 +57,26 @@ class AboutDialog(QDialog):
         # Info grid
         grid = QGridLayout()
         grid.setColumnStretch(1, 1)
+        dev = detect_device()
+        if dev.device.startswith("cuda"):
+            gpu_row = dev.label
+        elif dev.device == "mps":
+            gpu_row = dev.label
+        else:
+            # CPU fallback — include the actionable reason inline.
+            gpu_row = f"CPU (no GPU acceleration). {dev.reason}"
+        if dev.torch_cuda_build:
+            torch_build_row = f"CUDA {dev.torch_cuda_build}"
+        elif dev.device == "mps":
+            torch_build_row = "N/A on macOS (using Apple Metal / MPS)"
+        else:
+            torch_build_row = "CPU-only (no CUDA support compiled in)"
         rows = [
             ("Platform", f"{platform.system()} {platform.release()}"),
             ("Python", platform.python_version()),
             ("Architecture", platform.machine()),
+            ("Compute device", gpu_row),
+            ("PyTorch build", torch_build_row),
             ("Data folder", str(self.dm.data_root)),
             ("Log file", str(get_log_file())),
         ]

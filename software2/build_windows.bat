@@ -22,9 +22,20 @@ REM
 REM  - To force a clean rebuild: delete the venv folder above (NOT the
 REM    project folder), then re-run this script.
 REM
-REM  - To build with CPU-only torch (smaller, no NVIDIA GPU support):
-REM       set CCTV_YOLO_CPU_TORCH=1
-REM    before running this script.
+REM  - Picking a torch CUDA variant (default: cu118):
+REM       set CCTV_YOLO_TORCH_VARIANT=cu118   (default - widest driver compat,
+REM                                            works with any NVIDIA driver
+REM                                            >= 452.39 on Windows)
+REM       set CCTV_YOLO_TORCH_VARIANT=cu121   (newer GPUs only, needs driver >= 528.33)
+REM       set CCTV_YOLO_TORCH_VARIANT=cu124   (latest, needs even newer driver)
+REM       set CCTV_YOLO_TORCH_VARIANT=cpu     (no GPU, ~250 MB instead of ~2.5 GB)
+REM
+REM    Legacy alias: CCTV_YOLO_CPU_TORCH=1 still works (forces cpu).
+REM
+REM    If you ship a build and the end user reports "GPU detected by
+REM    nvidia-smi but the app runs on CPU", it's almost always because
+REM    their NVIDIA driver is older than the bundled CUDA wheel
+REM    requires. cu118 is the safe default for distribution.
 REM
 
 echo.
@@ -80,34 +91,43 @@ if errorlevel 1 (
     goto :fail
 )
 
-REM Try CUDA torch first for NVIDIA GPU support; fall back to CPU on
-REM failure (e.g. no wheel for this Python version, network blocked).
-if defined CCTV_YOLO_CPU_TORCH goto :install_cpu_torch
+REM Resolve which torch wheel to install.
+REM   - CCTV_YOLO_CPU_TORCH=1 (legacy)        -> cpu
+REM   - CCTV_YOLO_TORCH_VARIANT=cu118|cu121|cu124|cpu
+REM   - default                               -> cu118 (broadest driver compat)
+if defined CCTV_YOLO_CPU_TORCH set "CCTV_YOLO_TORCH_VARIANT=cpu"
+if not defined CCTV_YOLO_TORCH_VARIANT set "CCTV_YOLO_TORCH_VARIANT=cu118"
 
-echo Installing CUDA torch (NVIDIA GPU support, ~2.5 GB)...
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+set "TORCH_INDEX=https://download.pytorch.org/whl/%CCTV_YOLO_TORCH_VARIANT%"
+echo Installing torch (%CCTV_YOLO_TORCH_VARIANT%) from %TORCH_INDEX%
+python -m pip install torch torchvision --index-url %TORCH_INDEX%
 if errorlevel 1 (
     echo.
-    echo NOTE: CUDA torch install failed. Falling back to CPU-only torch.
+    echo NOTE: torch (%CCTV_YOLO_TORCH_VARIANT%) install failed. Falling back to CPU-only torch.
     echo.
-    goto :install_cpu_torch
+    python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    if errorlevel 1 (
+        echo.
+        echo ERROR: torch install failed.
+        echo Try one of:
+        echo   - Use Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
+        echo   - Check your internet connection
+        echo   - Run "python -m pip install torch torchvision" manually
+        goto :fail
+    )
+    set "CCTV_YOLO_TORCH_VARIANT=cpu"
 )
-goto :torch_ok
 
-:install_cpu_torch
-echo Installing CPU-only torch (~250 MB)...
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+REM Verify the installed torch actually reports CUDA when we asked for it.
+REM Catches the silent failure where pip resolves a CPU wheel even from the
+REM CUDA index (e.g. Python version mismatch with available wheels).
+echo.
+echo Verifying torch install...
+python -c "import torch; print('  torch version :', torch.__version__); print('  CUDA build    :', torch.version.cuda or '(CPU-only)'); print('  CUDA available:', torch.cuda.is_available())"
 if errorlevel 1 (
-    echo.
-    echo ERROR: torch install failed.
-    echo Try one of:
-    echo   - Use Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
-    echo   - Check your internet connection
-    echo   - Run "python -m pip install torch torchvision" manually
-    goto :fail
+    echo WARNING: could not run torch verification - continuing anyway.
 )
 
-:torch_ok
 python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
