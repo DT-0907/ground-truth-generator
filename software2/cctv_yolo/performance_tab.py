@@ -1404,6 +1404,7 @@ class PerformanceTab(QWidget):
         }
         self._performance_rois.append(roi)
         self._update_roi_display()
+        self._save_rois_to_session()
         self.btn_roi_rect.setChecked(False)
         self.perf_canvas.drawing_mode = "select"
         self.perf_canvas.set_cursor_for_mode()
@@ -1426,6 +1427,7 @@ class PerformanceTab(QWidget):
         }
         self._performance_rois.append(roi)
         self._update_roi_display()
+        self._save_rois_to_session()
         self.btn_roi_poly.setChecked(False)
         self.perf_canvas.drawing_mode = "select"
         self.perf_canvas.set_cursor_for_mode()
@@ -1437,11 +1439,19 @@ class PerformanceTab(QWidget):
     def _on_roi_clear_all(self) -> None:
         self._performance_rois = []
         self._update_roi_display()
+        self._save_rois_to_session()
         if self._current_session_id:
             self._load_stats(self._current_session_id)
         self._refresh_roi_pickers()
 
     def _update_roi_display(self) -> None:
+        # Render-only. Don't save here -- _on_session_changed calls this when
+        # loading a session, and a save here would re-emit corrections_changed
+        # which feeds back into _on_session_changed -> infinite write loop.
+        # On Windows that loop manifested as PermissionError (WinError 5)
+        # because OneDrive / AV holds a transient handle on the file while
+        # the next replace() lands. The 3 user-action handlers below call
+        # _save_rois_to_session() themselves.
         self.perf_canvas.rois = self._performance_rois
         self.perf_canvas.update()
         count = len(self._performance_rois)
@@ -1453,8 +1463,6 @@ class PerformanceTab(QWidget):
             self.roi_status.setText(
                 "Draw ROIs on the frame to calculate per-region statistics."
             )
-        if self._current_session_id:
-            self._save_rois_to_session()
 
     def _save_rois_to_session(self) -> None:
         sid = self._current_session_id

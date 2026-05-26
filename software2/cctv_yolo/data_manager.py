@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import cv2
 import numpy as np
 from pathlib import Path
@@ -72,7 +73,33 @@ def _atomic_write_json(path: Path, data: dict, *, indent: int = 2, backup: bool 
             json.dump(data, f, indent=indent)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_name, path)
+
+        # On Windows the destination may be transiently locked by OneDrive,
+        # Windows Search, antivirus, or another preview/Explorer handle.
+        # os.replace() then raises PermissionError (WinError 5 / 32). The
+        # lock is almost always gone within a few hundred ms — retry with
+        # backoff before giving up. No-op on POSIX where renames succeed
+        # immediately.
+        last_err: Exception | None = None
+        for attempt in range(6):       # ~0 + 0.05 + 0.1 + 0.2 + 0.4 + 0.8 = ~1.55s total
+            try:
+                os.replace(tmp_name, path)
+                last_err = None
+                break
+            except PermissionError as e:
+                last_err = e
+                if sys.platform != "win32":
+                    raise
+                time.sleep(0.05 * (2 ** attempt))
+        if last_err is not None:
+            logger.error(
+                "Atomic rename failed after retries: %s -> %s (%s). "
+                "This is usually OneDrive, Windows Search, or antivirus "
+                "holding the file. Try pausing OneDrive sync on the data "
+                "folder or excluding it from AV scans.",
+                tmp_name, path, last_err,
+            )
+            raise last_err
     except Exception:
         # Clean up the temp file on any failure so we don't leave debris.
         try:

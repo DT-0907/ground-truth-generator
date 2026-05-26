@@ -245,6 +245,28 @@ def main() -> int:
         proc_ok, proc_err = False, str(e)
     check("cctv_yolo.processor imports cleanly", proc_ok, proc_err)
 
+    # 13a. Regression: loading a session in the Performance tab must NOT
+    # write to disk. Old behavior re-saved the corrections file on every
+    # _update_roi_display(), which fed back into _on_corrections_changed
+    # -> _on_session_changed -> _update_roi_display ... an infinite loop.
+    # On Windows that loop blew up with PermissionError once OneDrive/AV
+    # grabbed a transient handle.
+    if sid_with_corrections:
+        before_mtime = (dm.corrections_dir / f"{sid_with_corrections}.json").stat().st_mtime
+        w.tabs.setCurrentWidget(w.performance_tab)
+        # Find the session in the combo and select it (triggers
+        # _on_session_changed -> _update_roi_display).
+        for i in range(w.performance_tab.session_combo.count()):
+            if w.performance_tab.session_combo.itemData(i) == sid_with_corrections:
+                w.performance_tab.session_combo.setCurrentIndex(i)
+                break
+        # Drain the Qt event loop so deferred signals run.
+        app.processEvents()
+        after_mtime = (dm.corrections_dir / f"{sid_with_corrections}.json").stat().st_mtime
+        check("Loading a session does NOT re-save corrections (no signal loop)",
+              before_mtime == after_mtime,
+              f"mtime before={before_mtime}, after={after_mtime}")
+
     # 13b. gpu_info.detect_device returns a sensible record. Regression
     # against the case where a Windows user reports "GPU detected by
     # nvidia-smi but app runs CPU" with no diagnostic.
