@@ -174,6 +174,17 @@ if errorlevel 1 (
 REM Ship the diagnostic launcher next to the exe (best-effort).
 if exist "CCTV-YOLO-debug.bat" copy /Y "CCTV-YOLO-debug.bat" "dist\CCTV-YOLO\" >nul
 
+REM Ship the end-user MOTW-strip helper alongside the exe.
+if exist "Unblock.bat" copy /Y "Unblock.bat" "dist\CCTV-YOLO\" >nul
+
+REM Strip Mark-of-the-Web (Zone.Identifier ADS) from the bundle on this
+REM build machine. Files Delbert ships should not carry MOTW from any
+REM source download; end users still need to re-Unblock after extracting
+REM the ZIP, which is what the bundled Unblock.bat is for.
+echo.
+echo Stripping Mark-of-the-Web from build output...
+powershell -NoProfile -Command "Get-ChildItem -LiteralPath 'dist\CCTV-YOLO' -Recurse -File | Unblock-File" 2>nul
+
 REM ---------- 4. Done ----------
 echo.
 echo [4/4] Done!

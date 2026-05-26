@@ -6,7 +6,7 @@ Setup installer for Windows gets a generated header from this same value
 (see build_windows.bat).
 """
 
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 __app_name__ = "CCTV-YOLO"
 __org_name__ = "CCTV-YOLO"
 __bundle_id__ = "com.cctv-yolo.app"

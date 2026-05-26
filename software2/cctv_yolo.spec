@@ -144,9 +144,17 @@ if sys.platform == 'darwin':
         },
     )
 else:
-    # Windows / Linux. console=True keeps the console open so any startup
-    # error (missing DLL, import failure) is visible instead of a silent
-    # flash — and crash.log captures it for next time too.
+    # Windows / Linux. Two exes ship in the same bundle:
+    #   CCTV-YOLO.exe        -> windowed (no console). Users double-click this.
+    #                           Cleaner UI: no black cmd window flashes alongside
+    #                           the GUI.
+    #   CCTV-YOLO-debug.exe  -> console=True. CCTV-YOLO-debug.bat calls this so
+    #                           native crash output (missing DLL, OMP errors,
+    #                           Qt platform plugin failures) is visible.
+    # PyInstaller supports multiple EXE entries that share one COLLECT bundle —
+    # the .exe stubs are tiny, the heavy binaries/datas are referenced once.
+    icon_path = ('cctv_yolo/resources/icon.ico'
+                 if Path('cctv_yolo/resources/icon.ico').exists() else None)
     exe = EXE(
         pyz,
         a.scripts,
@@ -157,11 +165,25 @@ else:
         bootloader_ignore_signals=False,
         strip=False,
         upx=False,
+        console=False,
+        icon=icon_path,
+    )
+    exe_debug = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='CCTV-YOLO-debug',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
         console=True,
-        icon='cctv_yolo/resources/icon.ico' if Path('cctv_yolo/resources/icon.ico').exists() else None,
+        icon=icon_path,
     )
     coll = COLLECT(
         exe,
+        exe_debug,
         a.binaries,
         a.zipfiles,
         a.datas,

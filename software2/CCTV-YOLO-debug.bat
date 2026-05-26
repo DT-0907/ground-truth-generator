@@ -16,7 +16,14 @@ echo Launching CCTV-YOLO with full output capture...
 echo This window will stay open so you can read any errors.
 echo.
 
-CCTV-YOLO.exe > startup-output.log 2>&1
+REM Prefer the console-enabled debug exe (built alongside the windowed
+REM production exe in v2.0.3+). Fall back to the main exe for older
+REM bundles that still shipped a single console=True CCTV-YOLO.exe.
+if exist "CCTV-YOLO-debug.exe" (
+    CCTV-YOLO-debug.exe > startup-output.log 2>&1
+) else (
+    CCTV-YOLO.exe > startup-output.log 2>&1
+)
 set EXITCODE=%errorlevel%
 
 echo.
