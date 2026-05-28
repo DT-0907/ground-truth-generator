@@ -60,7 +60,7 @@ echo.
 
 REM ---------- 1. Virtual environment ----------
 if not exist "%VENV_DIR%" (
-    echo [1/4] Creating virtual environment...
+    echo [1/5] Creating virtual environment...
     python -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo.
@@ -70,7 +70,7 @@ if not exist "%VENV_DIR%" (
         goto :fail
     )
 ) else (
-    echo [1/4] Reusing existing venv at %VENV_DIR%
+    echo [1/5] Reusing existing venv at %VENV_DIR%
 )
 
 call "%VENV_DIR%\Scripts\activate.bat"
@@ -83,7 +83,7 @@ if errorlevel 1 (
 
 REM ---------- 2. Dependencies ----------
 echo.
-echo [2/4] Installing dependencies (long download on first run)...
+echo [2/5] Installing dependencies (long download on first run)...
 
 python -m pip install --upgrade pip
 if errorlevel 1 (
@@ -143,7 +143,7 @@ if errorlevel 1 (
 
 REM ---------- 3. PyInstaller ----------
 echo.
-echo [3/4] Running PyInstaller (5-15 minutes)...
+echo [3/5] Running PyInstaller (5-15 minutes)...
 
 REM Send PyInstaller workpath / distpath to short %TEMP% subfolders.
 REM Deep project paths combined with PyInstaller's internal xcopy steps
@@ -185,9 +185,47 @@ echo.
 echo Stripping Mark-of-the-Web from build output...
 powershell -NoProfile -Command "Get-ChildItem -LiteralPath 'dist\CCTV-YOLO' -Recurse -File | Unblock-File" 2>nul
 
-REM ---------- 4. Done ----------
+REM ---------- 4. Installer (Inno Setup) ----------
 echo.
-echo [4/4] Done!
+echo [4/4] Building single-file installer (Inno Setup)...
+
+REM Read the app version from the single source of truth (__version__.py)
+REM via PowerShell regex so the installer filename/version stay in sync.
+set "APP_VERSION="
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Select-String -Path 'cctv_yolo\__version__.py' -Pattern '__version__\s*=\s*\"([^\"]+)\"').Matches.Groups[1].Value"`) do set "APP_VERSION=%%v"
+if not defined APP_VERSION set "APP_VERSION=0.0.0"
+echo   App version: %APP_VERSION%
+
+REM Locate the Inno Setup compiler (ISCC.exe). Check the standard install
+REM locations, then PATH.
+set "ISCC="
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC for %%I in (iscc.exe ISCC.exe) do if not defined ISCC if exist "%%~$PATH:I" set "ISCC=%%~$PATH:I"
+
+if defined ISCC (
+    echo   Using Inno Setup: %ISCC%
+    "%ISCC%" /DAppVersion=%APP_VERSION% installer_windows.iss
+    if errorlevel 1 (
+        echo.
+        echo WARNING: Inno Setup compile failed. The folder build in
+        echo dist\CCTV-YOLO\ is still usable; only the single-file
+        echo installer was not produced.
+    ) else (
+        set "INSTALLER_BUILT=1"
+    )
+) else (
+    echo.
+    echo NOTE: Inno Setup not found - skipping single-file installer.
+    echo The folder build in dist\CCTV-YOLO\ still works.
+    echo To get CCTV-YOLO-Setup.exe, install Inno Setup 6 from
+    echo   https://jrsoftware.org/isdl.php
+    echo and re-run this script.
+)
+
+REM ---------- 5. Done ----------
+echo.
+echo [5/5] Done!
 call deactivate 2>nul
 
 echo.
@@ -195,13 +233,17 @@ echo ==========================================
 echo   Build complete!
 echo ==========================================
 echo.
-echo   Executable: %CD%\dist\CCTV-YOLO\CCTV-YOLO.exe
-echo   Folder    : %CD%\dist\CCTV-YOLO\
-echo   Build venv: %VENV_DIR%
+if defined INSTALLER_BUILT (
+    echo   SHARE THIS:  %CD%\dist\CCTV-YOLO-Setup.exe
+    echo                ^(single-file installer - this is what you send^)
+    echo.
+)
+echo   Folder build: %CD%\dist\CCTV-YOLO\  ^(CCTV-YOLO.exe inside^)
+echo   Build venv  : %VENV_DIR%
 echo.
-echo To run:
+echo To run locally now:
 echo   1. Open the dist\CCTV-YOLO\ folder (opening it now)
-echo   2. Double-click CCTV-YOLO.exe
+echo   2. Double-click CCTV-YOLO.exe  (no console window - production mode)
 echo.
 echo Data folder:
 echo   The app stores videos, tracks, corrections, models, and logs in a
@@ -210,7 +252,8 @@ echo   can move that folder anywhere; the app will find it again on the
 echo   next launch.
 echo.
 echo If CCTV-YOLO.exe will not open, run CCTV-YOLO-debug.bat in the same
-echo folder. It captures the real startup error to startup-output.log.
+echo folder. It launches CCTV-YOLO-debug.exe (console build) and captures
+echo the real startup error to startup-output.log.
 echo.
 
 start "" "%CD%\dist\CCTV-YOLO"

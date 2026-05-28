@@ -8,6 +8,11 @@ import base64
 import subprocess
 from pathlib import Path
 
+# In a windowed (console=False) build, spawning a console command like
+# `net use` flashes a black cmd window. CREATE_NO_WINDOW suppresses it.
+# Only defined on Windows; 0 is a no-op everywhere else.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 class NasManager:
     """Manages NAS connection via Tailscale SMB."""
@@ -108,7 +113,8 @@ class NasManager:
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30
+                cmd, capture_output=True, text=True, timeout=30,
+                creationflags=_NO_WINDOW,
             )
             if result.returncode == 0:
                 return True, "Connected", mount_point
@@ -128,6 +134,7 @@ class NasManager:
                     ["net", "use", str(mount_point), "/delete", "/y"],
                     capture_output=True,
                     timeout=10,
+                    creationflags=_NO_WINDOW,
                 )
             else:
                 subprocess.run(

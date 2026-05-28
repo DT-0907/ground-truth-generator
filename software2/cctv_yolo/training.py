@@ -392,12 +392,15 @@ class TrainingWorker(QThread):
                 "exist_ok=True",
             ]
             self.log_line.emit("$ " + " ".join(cmd))
+            # CREATE_NO_WINDOW: stops `yolo` from flashing a console window
+            # in the windowed (console=False) build. No-op off Windows.
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
 
             epoch_re = re.compile(r"^\s*(\d+)/(\d+)\b")
