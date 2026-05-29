@@ -1,8 +1,10 @@
-# Enforce line endings so the Windows build script doesn't silently get
-# converted to LF on macOS/Linux checkouts (which crashes cmd.exe on
-# launch with no useful error).
-*.bat       text eol=crlf
-*.cmd       text eol=crlf
+# Store Windows scripts with CRLF bytes VERBATIM. `-text` = no EOL
+# normalization, so the committed CRLF bytes are kept for BOTH `git clone`
+# AND GitHub ZIP downloads. (The previous `text eol=crlf` stored LF in the
+# blob and only converted on checkout, so ZIP downloads got LF — which makes
+# cmd.exe parse-fail and the build window flash open/closed instantly.)
+*.bat       -text
+*.cmd       -text
 
 # Shell scripts and most source must stay LF.
 *.sh        text eol=lf
@@ -15,8 +17,8 @@
 *.cfg       text eol=lf
 *.txt       text eol=lf
 
-# Inno Setup scripts are Windows-only.
-*.iss       text eol=crlf
+# Inno Setup scripts are Windows-only — keep CRLF bytes verbatim too.
+*.iss       -text
 
 # Binary — never touch.
 *.png       binary
