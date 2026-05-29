@@ -115,11 +115,16 @@ The Windows script needs Python 3.10–3.12 (3.13/3.14 have no PyTorch wheels an
 make pip's resolver hang). It prefers the `py -3.12` launcher and auto-recreates
 a `build_venv` built with an unsupported version. **If no supported Python is
 found at all, it offers to auto-install Python 3.12 for you** (per-user, no
-admin needed) straight from python.org, then builds with it. It also
-auto-detects your GPU via `nvidia-smi` and picks the matching torch wheel —
-cu128 for RTX 50-series/Blackwell, down through cu126 / cu124 / cu121 / cu118
-for older cards, or cpu if no CUDA GPU is found. Set `CCTV_YOLO_TORCH_VARIANT`
-to override the auto-pick.
+admin needed) straight from python.org, then builds with it.
+
+**GPU is hybrid (v2.2.0):** the Windows build bakes a **universal CPU PyTorch**,
+so the resulting installer runs on any PC out of the box. GPU acceleration is
+*not* baked in — on first launch, if an NVIDIA GPU is detected, the app offers
+to download the matching CUDA build of PyTorch (**cu128** for RTX 50-series /
+Blackwell, **cu118** for older drivers) into a per-user folder and uses it after
+a restart. You can also trigger it later from **Settings → "Set up / repair GPU
+acceleration."** One installer therefore works for every machine — CPU and any
+NVIDIA GPU. macOS uses Apple MPS automatically with the baked PyTorch.
 
 If `CCTV-YOLO.exe` won't open after building, run `CCTV-YOLO-debug.bat`
 (shipped next to the exe) — it captures the real startup error to

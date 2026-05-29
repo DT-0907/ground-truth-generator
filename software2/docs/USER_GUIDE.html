@@ -846,38 +846,32 @@ python -m cctv_yolo.cli list-sessions</code></pre>
     <li>Processing logs record it too, in one consistent voice.</li>
   </ul>
 
-  <h3>The three reasons it falls back to CPU</h3>
-  <p>If you see "CPU" when you expected the GPU, the app tells you <em>which</em> of these you hit:</p>
-  <ol>
-    <li><strong>CPU-only PyTorch was bundled.</strong> The build doesn't contain CUDA support at all → rebuild with a CUDA variant (the Windows build script defaults to one).</li>
-    <li><strong>CUDA PyTorch is bundled, but no usable NVIDIA GPU is visible.</strong> Usually the NVIDIA <strong>driver is older</strong> than the bundled CUDA runtime needs → update your driver, or rebuild with a CUDA variant matching your driver.</li>
-    <li><strong>Driver too old for the bundled CUDA runtime.</strong> The most common Windows case — <code>nvidia-smi</code> shows the GPU, but the app runs on CPU because the wheel's CUDA runtime needs a newer driver.</li>
-  </ol>
-  <p>A related case: your GPU is <em>newer</em> than the CUDA build that was bundled (e.g. an RTX 50-series Blackwell card running a <code>cu124</code> build). The app now <strong>detects this and reports CPU-with-a-reason</strong> — telling you to "rebuild with <code>cu128</code>" — instead of crashing.</p>
-
-  <h3>NVIDIA: matching the CUDA variant to your driver</h3>
-  <p>The Windows build can be produced with different CUDA wheel variants. The build script <strong>auto-detects your GPU via <code>nvidia-smi</code> and picks the right wheel automatically</strong>; you only need to think about variants when building for a different machine or overriding the choice. Newer variants support newer GPUs but require newer drivers:</p>
+  <h3>How GPU acceleration is set up (the hybrid model)</h3>
+  <p>The Windows installer bakes in a <strong>universal CPU build of PyTorch</strong>, so the app runs on any PC out of the box — no GPU required, nothing to configure to get started.</p>
+  <p>On <strong>first launch</strong>, if the app detects an NVIDIA GPU, it offers to <strong>download the matching CUDA build of PyTorch</strong> and install it into a per-user folder (<code>%LocalAppData%\CCTV-YOLO\torch_runtime</code>). It picks the right CUDA build for your hardware/driver:</p>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Variant</th><th>Driver / GPU notes</th></tr></thead>
+      <thead><tr><th>CUDA build</th><th>When it's used</th></tr></thead>
       <tbody>
-        <tr><td><code>cu118</code></td><td>Broadest compatibility — works with any NVIDIA driver ≥ 452.39 on Windows. The safe fallback for older cards / mixed hardware.</td></tr>
-        <tr><td><code>cu121</code></td><td>Newer GPUs; needs driver ≥ 528.33.</td></tr>
-        <tr><td><code>cu124</code></td><td>Newer still; needs a more recent driver.</td></tr>
-        <tr><td><code>cu126</code></td><td>Recent cards; needs a recent driver.</td></tr>
-        <tr><td><code>cu128</code></td><td><strong>Required for RTX 50-series (Blackwell)</strong> — CUDA 12.8+; needs the newest driver.</td></tr>
-        <tr><td><code>cpu</code></td><td>No GPU; ~250 MB instead of ~2.5 GB.</td></tr>
+        <tr><td><code>cu128</code></td><td><strong>RTX 50-series (Blackwell)</strong> — CUDA 12.8+; the newest cards and drivers.</td></tr>
+        <tr><td><code>cu118</code></td><td>Older cards / older drivers — the broadly-compatible fallback.</td></tr>
       </tbody>
     </table>
   </div>
+  <p>After the download finishes, <strong>restart the app</strong> and the GPU is enabled. You can re-run this anytime — to set it up later, switch cards, or repair a bad install — from <strong>Settings → "Set up / repair GPU acceleration."</strong></p>
   <div class="callout note">
-    <span class="clabel">Newest GPUs (Blackwell / RTX 50-series)</span>
-    <p>RTX 50-series (Blackwell) cards <strong>require <code>cu128</code> (CUDA 12.8+)</strong> and the newest NVIDIA driver. Older cards use <code>cu124</code>, <code>cu121</code>, or <code>cu118</code>. The build auto-detects the right one; if a card is <em>newer</em> than the bundled build, the app reports "running on CPU — rebuild with <code>cu128</code>" instead of crashing.</p>
+    <span class="clabel">macOS</span>
+    <p>macOS doesn't use this flow — the baked PyTorch already enables <strong>Apple Metal (MPS)</strong> automatically (see below).</p>
   </div>
-  <div class="callout tip">
-    <span class="clabel">Tip · overriding the auto-detected variant</span>
-    <p>To force a specific wheel (e.g. building on a machine without the target GPU, or distributing to mixed hardware), set the <code>CCTV_YOLO_TORCH_VARIANT</code> environment variable before building — e.g. <code>cu128</code> for Blackwell, or <code>cu118</code> for the widest driver compatibility.</p>
-  </div>
+
+  <h3>The reasons it falls back to CPU</h3>
+  <p>If you see "CPU" when you expected the GPU, the app tells you <em>which</em> of these you hit:</p>
+  <ol>
+    <li><strong>The CUDA runtime hasn't been downloaded yet.</strong> The app is still on the universal CPU PyTorch → run <strong>Settings → Set up / repair GPU acceleration</strong> and restart.</li>
+    <li><strong>The CUDA runtime is installed, but no usable NVIDIA GPU is visible.</strong> Usually the NVIDIA <strong>driver is older</strong> than the downloaded CUDA build needs → update your driver, then re-run <strong>Settings → Set up / repair GPU acceleration</strong>.</li>
+    <li><strong>Driver too old for the downloaded CUDA runtime.</strong> A common Windows case — <code>nvidia-smi</code> shows the GPU, but the app runs on CPU because the CUDA build needs a newer driver. Update the driver and re-run the setup.</li>
+  </ol>
+  <p>A related case: your GPU is <em>newer</em> than the CUDA build currently installed (e.g. an RTX 50-series Blackwell card on a <code>cu118</code> runtime). The app <strong>detects this and reports CPU-with-a-reason</strong> — pointing you to <strong>Settings → Set up / repair GPU acceleration</strong> to fetch the <code>cu128</code> build — instead of crashing.</p>
 
   <h3>Apple Silicon (MPS)</h3>
   <p>On M1/M2/M3 Macs, Metal acceleration is enabled automatically via <code>torch.backends.mps</code> — no install, no configuration. The status bar will say <em>Apple Metal (MPS)</em>.</p>

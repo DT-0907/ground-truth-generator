@@ -36,6 +36,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -137,23 +138,30 @@ def _run_smi(args: list[str]) -> str:
     try:
         out = subprocess.run(
             args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            timeout=15, creationflags=_NO_WINDOW,
+            timeout=10, creationflags=_NO_WINDOW,
         )
         return out.stdout.decode("utf-8", "replace")
     except Exception:
         return ""
 
 
+@lru_cache(maxsize=1)
 def _driver_cuda_code() -> int:
-    """Parse 'CUDA Version: 12.8' from nvidia-smi -> 1208. 0 if no NVIDIA GPU."""
+    """Parse 'CUDA Version: 12.8' from nvidia-smi -> 1208. 0 if no NVIDIA GPU.
+
+    Cached: nvidia-smi is slow-ish and the driver can't change mid-process, so
+    should_offer()/the dialog/Settings all reuse one query instead of stalling
+    the GUI thread repeatedly.
+    """
     m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", _run_smi(["nvidia-smi"]))
     if not m:
         return 0
     return int(m.group(1)) * 100 + int(m.group(2))
 
 
+@lru_cache(maxsize=1)
 def gpu_name() -> str:
-    """First NVIDIA GPU name, or '' if none."""
+    """First NVIDIA GPU name, or '' if none. Cached (see _driver_cuda_code)."""
     txt = _run_smi(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
     return txt.strip().splitlines()[0].strip() if txt.strip() else ""
 
@@ -241,7 +249,7 @@ def resolve_plan(variant: str) -> list[dict]:
 
 def estimated_download_mb(variant: str) -> int:
     """Rough total download size for the variant (for UI copy)."""
-    return 3200 if variant == "cu128" else 2900
+    return 3400 if variant == "cu128" else 2900
 
 
 def _download(url: str, sha256: str, dest: Path,

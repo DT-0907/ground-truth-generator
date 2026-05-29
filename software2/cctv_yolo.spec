@@ -79,6 +79,19 @@ if IS_WIN:
                 f"Windows build stages the CPU torch — run build_windows.bat "
                 f"(it installs torch+torchvision from the cpu index first).")
         _torch_cpu_tree += Tree(str(_src), prefix='torch_cpu_baseline/' + _pkg)
+        # CRITICAL: stage the sibling *.dist-info NEXT TO the package, mirroring
+        # a normal site-packages layout. ultralytics runs
+        # importlib.metadata.version("torchvision") at IMPORT time; with no
+        # dist-info on sys.path that raises PackageNotFoundError and crashes
+        # `from ultralytics import YOLO` on every fresh CPU install. (The
+        # downloaded GPU wheels already carry their own dist-info, so that path
+        # is fine — this only affects the baked CPU baseline.)
+        _di = sorted(_site.glob(_pkg + '-*.dist-info'))
+        if not _di:
+            raise SystemExit(
+                f"cctv_yolo.spec: no {_pkg}-*.dist-info beside {_src} — "
+                f"importlib.metadata.version('{_pkg}') would crash at runtime.")
+        _torch_cpu_tree += Tree(str(_di[0]), prefix='torch_cpu_baseline/' + _di[0].name)
 
     # CRITICAL: torch's DLLs (torch_cpu.dll/c10.dll/fbgemm.dll) dynamically link
     # the MSVC C/C++ runtime — msvcp140.dll, vcruntime140.dll, and especially

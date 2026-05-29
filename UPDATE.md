@@ -73,6 +73,12 @@ shipped this round.
 
 ## GPU / CUDA: Blackwell (RTX 50-series) support
 
+> **Superseded by Wave 4.** The build-time GPU auto-detect described below
+> (`detect_torch_variant.py`, baking one CUDA variant per build) was replaced
+> by the Wave 4 *hybrid* model: the build now bakes CPU torch and the matching
+> CUDA build is downloaded at first run. `detect_torch_variant.py` was removed.
+> The `gpu_info`/`processor` runtime resilience below is still current.
+
 - New **`detect_torch_variant.py`** auto-detects the GPU/driver via
   `nvidia-smi` and picks the right torch wheel index: **cu128**
   (Blackwell / driver CUDA ≥ 12.8), cu126, cu124, cu121, cu118, or
