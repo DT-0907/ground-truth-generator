@@ -8,6 +8,7 @@ Builds:
 """
 
 import ast
+import os
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -47,18 +48,73 @@ ultralytics_hiddenimports = collect_submodules('ultralytics')
 # PyInstaller's static analysis misses about 30 of them.
 cctv_hiddenimports = collect_submodules('cctv_yolo')
 
+IS_WIN = sys.platform == 'win32'
+
+# torch's pure-Python deps (GPU-independent). Normally pulled in transitively,
+# but on Windows we EXCLUDE torch from analysis (below), which cuts that import
+# chain — so list them explicitly so BOTH the baked CPU torch and a downloaded
+# GPU torch import cleanly.
+_TORCH_PY_DEPS = [
+    'filelock', 'typing_extensions', 'sympy', 'mpmath',
+    'networkx', 'jinja2', 'markupsafe', 'fsspec', 'setuptools',
+]
+
+if IS_WIN:
+    # HYBRID packaging (see cctv_yolo/gpu_runtime.py): torch is NOT frozen into
+    # the PYZ — a frozen torch can't be overridden by a downloaded GPU build,
+    # because PyInstaller's frozen importer beats sys.path. Instead we EXCLUDE
+    # torch/torchvision and ship the CPU build as a data tree under
+    # torch_cpu_baseline/. runtime_hook.py puts the active one (downloaded GPU
+    # build if installed, else this CPU baseline) first on sys.path.
+    from PyInstaller.building.datastruct import Tree
+    _torch_extra_hidden = _TORCH_PY_DEPS
+    _torch_excludes = ['torch', 'torchvision']
+    _site = Path(sys.prefix) / 'Lib' / 'site-packages'
+    _torch_cpu_tree = []
+    for _pkg in ('torch', 'torchvision'):
+        _src = _site / _pkg
+        if not _src.is_dir():
+            raise SystemExit(
+                f"cctv_yolo.spec: CPU {_pkg} not found at {_src}. The hybrid "
+                f"Windows build stages the CPU torch — run build_windows.bat "
+                f"(it installs torch+torchvision from the cpu index first).")
+        _torch_cpu_tree += Tree(str(_src), prefix='torch_cpu_baseline/' + _pkg)
+
+    # CRITICAL: torch's DLLs (torch_cpu.dll/c10.dll/fbgemm.dll) dynamically link
+    # the MSVC C/C++ runtime — msvcp140.dll, vcruntime140.dll, and especially
+    # vcruntime140_1.dll (the VS2019+ EH runtime). These are NOT inside the
+    # torch wheel. Because we EXCLUDE torch from analysis, PyInstaller never
+    # inspects torch's DLLs and so never learns to collect them — they'd reach
+    # the bundle only by luck of another dep referencing them. Bundle them
+    # EXPLICITLY so `import torch` works on clean Windows boxes with no system
+    # VC++ redistributable (the whole target audience).
+    _sys32 = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+    _vc_dlls = []
+    for _d in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'vcomp140.dll'):
+        _p = _sys32 / _d
+        if _p.is_file():
+            _vc_dlls.append((str(_p), '.'))
+else:
+    # macOS / Linux: bake torch normally (macOS uses MPS — one variant, no
+    # download needed; the GPU-download feature is gated to win32).
+    _torch_extra_hidden = ['torch', 'torchvision']
+    _torch_excludes = []
+    _torch_cpu_tree = []
+    _vc_dlls = []
+
 a = Analysis(
     ['cctv_yolo/main.py'],
     pathex=[],
-    binaries=[],
+    binaries=_vc_dlls,
     datas=ultralytics_datas,
     hiddenimports=cctv_hiddenimports + ultralytics_hiddenimports + [
         'cv2',
         'numpy',
         'tqdm',
         'ultralytics',
-        'torch',
-        'torchvision',
+        # NOTE: torch/torchvision are added via _torch_extra_hidden below — on
+        # Windows they are EXCLUDED from the bundle and shipped as a data tree
+        # instead (hybrid GPU packaging), so they must NOT be hardcoded here.
         'PySide6',
         'PySide6.QtCore',
         'PySide6.QtGui',
@@ -79,7 +135,7 @@ a = Analysis(
         'seaborn',               # ultralytics.utils.plotting
         'PIL',                   # ultralytics image utils
         'PIL.Image',
-    ],
+    ] + _torch_extra_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['runtime_hook.py'],
@@ -98,7 +154,7 @@ a = Analysis(
         'PIL.ImageQt',
         'PyQt5',
         'PyQt6',
-    ],
+    ] + _torch_excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,
@@ -190,6 +246,7 @@ else:
         a.binaries,
         a.zipfiles,
         a.datas,
+        _torch_cpu_tree,   # CPU torch/torchvision staged under torch_cpu_baseline/
         strip=False,
         upx=False,
         name='CCTV-YOLO',

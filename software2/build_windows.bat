@@ -23,21 +23,14 @@ REM    Default: %USERPROFILE%\.cctv_yolo_build_venv
 REM    Override with the CCTV_YOLO_BUILD_VENV env var.
 REM    A reused venv built with an unsupported Python is auto-recreated.
 REM
-REM  - GPU / CUDA: this script AUTO-DETECTS your GPU via nvidia-smi and
-REM    picks the matching torch wheels:
-REM       cu128  RTX 50-series (Blackwell) / driver CUDA >= 12.8
-REM       cu126  driver CUDA >= 12.6
-REM       cu124  driver CUDA >= 12.4
-REM       cu121  driver CUDA >= 12.1
-REM       cu118  older NVIDIA GPUs / drivers
-REM       cpu    no NVIDIA GPU detected (~250 MB instead of ~2.5 GB)
-REM    Override the auto-pick:  set CCTV_YOLO_TORCH_VARIANT=cu128
-REM    Legacy alias:            set CCTV_YOLO_CPU_TORCH=1   (forces cpu)
-REM
-REM    IMPORTANT: cu118/cu121/cu124/cu126 have NO kernels for Blackwell
-REM    (RTX 50-series, compute sm_120). Those GPUs MUST use cu128, which is
-REM    why auto-detection exists — the old fixed cu118 default ran such
-REM    cards on CPU or crashed with "no kernel image is available".
+REM  - GPU / CUDA (HYBRID): this build bakes a UNIVERSAL CPU PyTorch into the
+REM    installer, so the app runs on ANY PC out of the box. GPU acceleration is
+REM    NOT baked in. On first launch, if an NVIDIA GPU is detected, the app
+REM    offers to download the matching CUDA build of PyTorch (cu128 for
+REM    RTX 50-series / Blackwell, cu118 for older drivers) into a per-user
+REM    folder, then uses it after a restart. See cctv_yolo/gpu_runtime.py.
+REM    Result: ONE installer works everywhere — CPU and any NVIDIA GPU
+REM    (including Blackwell, which needs cu128 and is handled at runtime).
 REM
 
 echo.
@@ -136,60 +129,31 @@ if errorlevel 1 (
     goto :fail
 )
 
-REM Resolve which torch wheel index to use.
-REM   - CCTV_YOLO_CPU_TORCH=1 (legacy)  -> cpu
-REM   - CCTV_YOLO_TORCH_VARIANT set      -> honored as-is (manual override)
-REM   - otherwise                        -> auto-detected from nvidia-smi
-if defined CCTV_YOLO_CPU_TORCH set "CCTV_YOLO_TORCH_VARIANT=cpu"
-if not defined CCTV_YOLO_TORCH_VARIANT (
-    echo Detecting GPU / CUDA to choose the right torch wheels...
-    for /f "usebackq delims=" %%v in (`python detect_torch_variant.py`) do set "CCTV_YOLO_TORCH_VARIANT=%%v"
-)
-if not defined CCTV_YOLO_TORCH_VARIANT set "CCTV_YOLO_TORCH_VARIANT=cu118"
-echo Selected torch variant: %CCTV_YOLO_TORCH_VARIANT%
-
-set "TORCH_INDEX=https://download.pytorch.org/whl/%CCTV_YOLO_TORCH_VARIANT%"
-echo Installing torch (%CCTV_YOLO_TORCH_VARIANT%) from %TORCH_INDEX%
-python -m pip install torch torchvision --index-url %TORCH_INDEX%
+REM PyTorch CPU baseline. HYBRID packaging: the shipped app bakes a UNIVERSAL
+REM CPU PyTorch (staged as a data tree by cctv_yolo.spec). GPU acceleration is
+REM a per-machine, first-run DOWNLOAD handled at runtime by
+REM cctv_yolo.gpu_runtime, so the build only needs CPU torch here. Pinned to
+REM match the runtime GPU pin (torch 2.8.0 / torchvision 0.23.0) so the baked
+REM CPU build and a downloaded CUDA build line up.
+echo.
+echo Installing CPU PyTorch baseline (torch 2.8.0 + torchvision 0.23.0)...
+echo (GPU acceleration is offered automatically on first run if an NVIDIA card is present.)
+python -m pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
 if errorlevel 1 (
     echo.
-    echo NOTE: torch (%CCTV_YOLO_TORCH_VARIANT%) install failed. Falling back to CPU-only torch.
-    echo.
-    python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    if errorlevel 1 (
-        echo.
-        echo ERROR: torch install failed.
-        echo Try one of:
-        echo   - Confirm Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
-        echo   - Check your internet connection
-        echo   - Run "python -m pip install torch torchvision" manually
-        goto :fail
-    )
-    set "CCTV_YOLO_TORCH_VARIANT=cpu"
+    echo ERROR: CPU torch 2.8.0 install failed. The baked baseline must match
+    echo the GPU runtime pin (2.8.0), so this does NOT fall back to a different
+    echo version. Try one of:
+    echo   - Confirm Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
+    echo   - Check your internet connection
+    goto :fail
 )
 
-REM Verify the installed torch and catch a SILENT CPU-wheel fallback (pip
-REM sometimes resolves a CPU wheel even from a CUDA index). Exit code 2 =
-REM we asked for CUDA but got CPU-only torch.
 echo.
 echo Verifying torch install...
-python -c "import torch,sys; cuda=torch.version.cuda; print('  torch version :', torch.__version__); print('  CUDA build    :', cuda or '(CPU-only)'); print('  CUDA available:', torch.cuda.is_available()); sys.exit(2 if ('%CCTV_YOLO_TORCH_VARIANT%'!='cpu' and not cuda) else 0)"
-if errorlevel 2 (
-    echo.
-    echo WARNING: a CUDA torch was requested (%CCTV_YOLO_TORCH_VARIANT%) but a
-    echo CPU-only torch got installed. The app will run on CPU. This usually
-    echo means no matching CUDA wheel exists for your Python version. Use
-    echo Python 3.12 and re-run, or set CCTV_YOLO_TORCH_VARIANT explicitly.
-    echo.
-) else (
-    REM exit code 1 = the verification python itself failed (torch did not
-    REM even import). Surface it instead of silently continuing.
-    if errorlevel 1 (
-        echo.
-        echo WARNING: could not import torch for verification - it may have
-        echo failed to install correctly. Continuing, but the build may not run.
-        echo.
-    )
+python -c "import torch; print('  torch version :', torch.__version__); print('  build         : CPU baseline (GPU is a first-run download)')"
+if errorlevel 1 (
+    echo WARNING: could not import torch for verification - continuing anyway.
 )
 
 python -m pip install -r requirements.txt
@@ -296,7 +260,7 @@ if defined INSTALLER_BUILT (
 )
 echo   Folder build: %CD%\dist\CCTV-YOLO\  ^(CCTV-YOLO.exe inside^)
 echo   Build venv  : %VENV_DIR%
-echo   torch wheel : %CCTV_YOLO_TORCH_VARIANT%
+echo   torch       : CPU baseline (GPU auto-offered on first run for NVIDIA cards)
 echo.
 echo To run locally now:
 echo   1. Open the dist\CCTV-YOLO\ folder (opening it now)

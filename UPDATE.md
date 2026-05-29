@@ -5,6 +5,44 @@ the union of both. Older features from wave 1 are preserved in wave 2.
 
 ---
 
+# Wave 4 — Hybrid GPU packaging: one Windows installer for every machine (2026-05-29)
+
+The Windows distributable is now **one universal installer** that works on any
+PC and gains GPU acceleration on demand — no per-GPU builds, no env vars.
+
+**How it works.** The build bakes a **universal CPU PyTorch** into the
+installer (staged as a data tree, not frozen into the PYZ — a frozen torch
+can't be overridden, since PyInstaller's frozen importer beats `sys.path`).
+On first launch, if an NVIDIA GPU is detected, the app offers to **download
+the matching CUDA build** of torch+torchvision (cu128 for RTX 50-series /
+Blackwell, cu118 for older drivers) into a per-user folder
+(`%LocalAppData%\CCTV-YOLO\torch_runtime`); `runtime_hook.py` puts that folder
+first on `sys.path` on the next launch, so the app then runs on the GPU. A
+restart is required (torch can't be hot-swapped). The app **always works on
+the baked CPU torch** if the download is skipped, fails, or is interrupted —
+the `.torch_ready` marker is written last, so a half-install is never used.
+
+- New `cctv_yolo/gpu_runtime.py` — stdlib-only GPU detection, pinned-wheel
+  resolution against the live PyTorch index (sha256-verified), download +
+  unzip into the per-user runtime dir. Pins: cu128 → torch 2.8.0 / tv 0.23.0;
+  cu118 → torch 2.7.1 / tv 0.22.1.
+- New `cctv_yolo/gpu_setup_dialog.py` — first-run + Settings dialog with a
+  progress bar, cancel, and a restart prompt. Wired into `main.py` (first run)
+  and Settings → **"Set up / repair GPU acceleration"**.
+- `cctv_yolo.spec` (Windows): excludes torch/torchvision from the bundle,
+  stages the CPU build under `torch_cpu_baseline/`, freezes torch's
+  pure-Python deps, and **explicitly bundles the MSVC runtime**
+  (`vcruntime140_1.dll` etc.) that torch needs — PyInstaller no longer
+  analyzes torch's DLLs, so this can't be left to chance.
+- `build_windows.bat` now bakes the CPU baseline (pinned torch 2.8.0+cpu).
+  The old build-time CUDA auto-detect (`detect_torch_variant.py`) is removed —
+  GPU selection moved to runtime. macOS is unchanged (torch baked, MPS auto).
+- Verified by two adversarial multi-agent reviews (the live PyTorch index was
+  fetched to confirm wheel URLs/sha256/self-containment). Windows-machine
+  testing still required before wide distribution.
+
+---
+
 # Wave 3 — Cross-platform build & runtime hardening (2026-05-28)
 
 This wave is not about new features — it's about making the v2 desktop

@@ -348,6 +348,21 @@ def main():
         }}
     """)
 
+    # First-run GPU acceleration (Windows + NVIDIA only). This only DOWNLOADS a
+    # GPU torch and asks for a restart — runtime_hook.py selects the active
+    # torch at the START of the next launch, so the in-session import order
+    # doesn't matter here. Best-effort: the app always works on the baked CPU
+    # torch if this is skipped or fails.
+    try:
+        from cctv_yolo import gpu_runtime
+        offer, variant = gpu_runtime.should_offer()
+        if offer and variant:
+            from cctv_yolo.gpu_setup_dialog import maybe_run_gpu_setup
+            maybe_run_gpu_setup(variant, parent=None)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("GPU setup check failed")
+
     # Ensure data directories exist
     dm = DataManager()
 

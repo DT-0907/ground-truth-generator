@@ -293,6 +293,31 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(folders_group)
 
+        # --- GPU Acceleration section (Windows only) ---
+        import sys as _sys
+        if _sys.platform == "win32":
+            from cctv_yolo import gpu_runtime
+            gpu_group = QGroupBox("GPU Acceleration")
+            gpu_group.setStyleSheet(GROUP_STYLE)
+            gpu_layout = QVBoxLayout(gpu_group)
+            gpu_layout.setSpacing(8)
+            if gpu_runtime.is_installed():
+                _info = gpu_runtime.installed_info() or {}
+                _txt = (f"Active: PyTorch {_info.get('torch', '?')} "
+                        f"({_info.get('variant', '?')}) — GPU enabled.")
+            elif gpu_runtime.gpu_name():
+                _txt = (f"{gpu_runtime.gpu_name()} detected, currently running on "
+                        "CPU. Set up GPU acceleration for a big speedup.")
+            else:
+                _txt = "No NVIDIA GPU detected — running on CPU."
+            self.lbl_gpu_status = QLabel(_txt)
+            self.lbl_gpu_status.setWordWrap(True)
+            gpu_layout.addWidget(self.lbl_gpu_status)
+            self.btn_setup_gpu = QPushButton("Set up / repair GPU acceleration")
+            self.btn_setup_gpu.clicked.connect(self._on_setup_gpu)
+            gpu_layout.addWidget(self.btn_setup_gpu)
+            layout.addWidget(gpu_group)
+
         # --- NAS Connection section ---
         nas_group = QGroupBox("NAS Connection (Tailscale SMB)")
         nas_group.setStyleSheet(GROUP_STYLE)
@@ -383,6 +408,27 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     # NAS config persistence
     # ------------------------------------------------------------------
+
+    def _on_setup_gpu(self):
+        """Open the GPU acceleration setup dialog (Settings -> GPU)."""
+        from cctv_yolo import gpu_runtime
+        from cctv_yolo.gpu_setup_dialog import GpuSetupDialog
+        variant = gpu_runtime.desired_variant()
+        if not variant:
+            QMessageBox.information(
+                self, "GPU Acceleration",
+                "No NVIDIA GPU was detected on this machine, so there's nothing "
+                "to install. CCTV-YOLO runs on CPU here.",
+            )
+            return
+        gpu_runtime.clear_declined()
+        GpuSetupDialog(variant, parent=self).exec()
+        if gpu_runtime.is_installed() and hasattr(self, "lbl_gpu_status"):
+            info = gpu_runtime.installed_info() or {}
+            self.lbl_gpu_status.setText(
+                f"Active: PyTorch {info.get('torch', '?')} "
+                f"({info.get('variant', '?')}). Restart CCTV-YOLO to use it."
+            )
 
     def _load_nas_config(self):
         """Load saved NAS config into the form inputs."""

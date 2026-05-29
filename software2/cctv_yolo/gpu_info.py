@@ -102,10 +102,10 @@ def detect_device() -> DeviceInfo:
             sm = f"sm_{cap[0]}{cap[1]}"
             reason = (
                 f"Your GPU ({name or 'NVIDIA GPU'}, compute {sm}) is newer "
-                f"than the bundled PyTorch CUDA build (CUDA "
+                f"than the active PyTorch CUDA build (CUDA "
                 f"{torch_cuda_build or '?'}; kernels: {', '.join(arches)}). "
-                "RTX 50-series (Blackwell) needs CUDA 12.8 — rebuild with "
-                "CCTV_YOLO_TORCH_VARIANT=cu128 and re-run build_windows.bat. "
+                "Use Settings -> 'Set up / repair GPU acceleration' to install "
+                "the matching build (RTX 50-series / Blackwell needs cu128). "
                 "Running on CPU for now to avoid a hard crash."
             )
             return DeviceInfo("cpu", "CPU", torch_cuda_build, reason)
@@ -128,8 +128,9 @@ def detect_device() -> DeviceInfo:
     # CPU fallback — figure out *why*.
     if not torch_cuda_build:
         reason = (
-            "PyTorch was installed without CUDA support (CPU-only build). "
-            "Rebuild with build_windows.bat — it defaults to CUDA torch."
+            "PyTorch is running in CPU-only mode. On Windows, enable GPU "
+            "acceleration from Settings -> 'Set up / repair GPU acceleration' "
+            "(it downloads the matching CUDA build for your card)."
         )
     else:
         # CUDA-built torch but is_available() is False. Most common cause
@@ -137,11 +138,9 @@ def detect_device() -> DeviceInfo:
         # CUDA runtime. Less common: no NVIDIA hardware at all.
         reason = (
             f"PyTorch was built for CUDA {torch_cuda_build} but no usable "
-            "NVIDIA GPU is visible. Update your NVIDIA driver, or rebuild "
-            "with a CUDA variant matching your GPU and driver: newest GPUs "
-            "(RTX 50-series / Blackwell) need CCTV_YOLO_TORCH_VARIANT=cu128; "
-            "RTX 30/40-series use cu121 or cu124; older cards use cu118. "
-            "Then re-run build_windows.bat."
+            "NVIDIA GPU is visible. Update your NVIDIA driver, or (on Windows) "
+            "use Settings -> 'Set up / repair GPU acceleration' to install a "
+            "CUDA build matching your card."
         )
     return DeviceInfo("cpu", "CPU", torch_cuda_build, reason)
 

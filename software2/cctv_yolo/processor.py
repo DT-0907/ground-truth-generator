@@ -30,10 +30,10 @@ class BatchCancelled(Exception):
 
 
 _KERNEL_IMAGE_MSG = (
-    "Your GPU is newer than this build's bundled CUDA runtime, so there are "
-    "no compatible compute kernels. Rebuild with a matching CUDA variant — "
-    "RTX 50-series (Blackwell) needs CCTV_YOLO_TORCH_VARIANT=cu128 — then "
-    "re-run build_windows.bat. (You can also run on CPU in the meantime.)"
+    "Your GPU is newer than the active PyTorch CUDA build, so there are no "
+    "compatible compute kernels. On Windows, use Settings -> 'Set up / repair "
+    "GPU acceleration' to install the matching build (RTX 50-series / Blackwell "
+    "needs cu128). You can keep working on CPU in the meantime."
 )
 
 
