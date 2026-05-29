@@ -12,9 +12,9 @@ REM
 REM  - PYTHON VERSION: PyTorch publishes wheels for Python 3.10, 3.11, and
 REM    3.12 ONLY. Python 3.13 and 3.14 have NO torch wheels yet, so a build
 REM    on them HANGS forever in pip's resolver (it looks frozen). This
-REM    script now refuses to build on an unsupported Python and prefers the
-REM    `py -3.12` launcher automatically. If you only have 3.13/3.14
-REM    installed, install Python 3.12 from python.org and re-run.
+REM    script prefers the `py -3.12` launcher automatically; if NO supported
+REM    Python is found it OFFERS TO AUTO-INSTALL Python 3.12 for you
+REM    (per-user, no admin needed) from python.org, then builds with it.
 REM
 REM  - The venv is created at a SHORT path under your user profile, not
 REM    inside the project folder, so deep pip-install paths (PySide6,
@@ -50,6 +50,9 @@ echo.
 
 cd /d "%~dp0"
 
+REM Python version to auto-install if no supported interpreter is found.
+set "PY_VER=3.12.8"
+
 REM ---------- 0. Find a supported Python (3.10-3.12) ----------
 REM Prefer the py launcher with an explicit version so we never grab a
 REM too-new 3.13/3.14 that torch has no wheels for.
@@ -59,9 +62,12 @@ call :try_py "py -3.11"
 call :try_py "py -3.10"
 call :try_py "python"
 call :try_py "py"
+REM Nothing supported on the machine? Offer to auto-install Python 3.12.
+if not defined PYCMD call :install_python
 if not defined PYCMD (
     echo.
-    echo ERROR: No supported Python found on this machine.
+    echo ERROR: No supported Python (3.10-3.12) is available, and the
+    echo automatic install did not complete.
     echo.
     echo PyTorch ships wheels for Python 3.10, 3.11, and 3.12 ONLY.
     echo Your "python" is most likely 3.13 or 3.14 ^(too new^) or missing.
@@ -319,6 +325,67 @@ REM rest once PYCMD is set. Missing launchers fail the probe harmlessly.
 if defined PYCMD goto :eof
 %~1 -c "import sys;sys.exit(0 if (3,10)<=sys.version_info[:2]<=(3,12) else 1)" >nul 2>&1
 if not errorlevel 1 set "PYCMD=%~1"
+goto :eof
+
+
+:try_py_path
+REM %~1 = a full path to a python.exe. Like :try_py, but stores PYCMD
+REM QUOTED so later "%PYCMD% -m venv ..." works even when the path has
+REM spaces (e.g. C:\Program Files\...). Used to find a freshly-installed
+REM Python whose new PATH entry isn't live in this cmd session yet.
+if defined PYCMD goto :eof
+if not exist "%~1" goto :eof
+"%~1" -c "import sys;sys.exit(0 if (3,10)<=sys.version_info[:2]<=(3,12) else 1)" >nul 2>&1
+if not errorlevel 1 set PYCMD="%~1"
+goto :eof
+
+
+:install_python
+REM No supported Python found -> offer to download + install Python %PY_VER%
+REM (per-user, no admin) from python.org, then re-probe. Declining or any
+REM failure just returns with PYCMD unset (caller then prints manual help).
+echo.
+echo ==========================================
+echo   No supported Python (3.10-3.12) found
+echo ==========================================
+echo.
+echo PyTorch has no wheels for Python 3.13/3.14, so the build cannot proceed
+echo with what is installed. This script can download and install Python
+echo %PY_VER% for you now (per-user, no admin required, alongside any other
+echo Python you have).
+echo.
+choice /C YN /T 20 /D Y /M "Install Python %PY_VER% automatically now"
+if errorlevel 2 (
+    echo Skipping auto-install.
+    goto :eof
+)
+echo.
+echo Downloading Python %PY_VER% installer from python.org...
+set "PY_SETUP=%TEMP%\python-%PY_VER%-amd64.exe"
+set "PY_URL=https://www.python.org/ftp/python/%PY_VER%/python-%PY_VER%-amd64.exe"
+powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -UseBasicParsing -Uri '%PY_URL%' -OutFile '%PY_SETUP%'; Unblock-File '%PY_SETUP%' } catch { exit 1 }"
+if errorlevel 1 (
+    echo.
+    echo Download failed (no internet, or the URL changed). Falling back to
+    echo the manual install instructions below.
+    goto :eof
+)
+echo Installing Python %PY_VER% silently (about a minute)...
+"%PY_SETUP%" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 Include_pip=1
+REM The installer just updated PATH, but that is NOT live in this session.
+REM Probe the deterministic per-user install path directly (and the py
+REM launcher, in case it landed somewhere already on PATH).
+call :try_py_path "%LocalAppData%\Programs\Python\Python312\python.exe"
+call :try_py_path "%ProgramFiles%\Python312\python.exe"
+call :try_py "py -3.12"
+del /Q "%PY_SETUP%" >nul 2>&1
+if defined PYCMD (
+    echo.
+    echo Installed Python %PY_VER%: %PYCMD%
+) else (
+    echo.
+    echo Python installer ran but a working 3.12 was not found afterward.
+)
 goto :eof
 
 

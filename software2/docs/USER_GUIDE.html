@@ -400,7 +400,7 @@ kbd{
 
   <div class="callout warn">
     <span class="clabel">Building from source · Python 3.10–3.12 required</span>
-    <p>If you are <em>building</em> the Windows app (not just running a prebuilt one), you need <strong>Python 3.10, 3.11, or 3.12</strong>. Python <strong>3.13 / 3.14 have no PyTorch wheels</strong>, so a build on them will hang. The build script now <strong>refuses unsupported Python versions</strong>, prefers the <code>py -3.12</code> launcher, and will <strong>automatically recreate a build venv</strong> that was made with an unsupported Python.</p>
+    <p>If you are <em>building</em> the Windows app (not just running a prebuilt one), you need <strong>Python 3.10, 3.11, or 3.12</strong>. Python <strong>3.13 / 3.14 have no PyTorch wheels</strong>, so a build on them will hang. The build script now <strong>refuses unsupported Python versions</strong>, prefers the <code>py -3.12</code> launcher, and will <strong>automatically recreate a build venv</strong> that was made with an unsupported Python. And if <strong>no supported Python is found at all</strong>, the script <strong>offers to auto-install Python 3.12 for you</strong> — downloaded from python.org and installed per-user (no admin rights), after which the build continues with it automatically. So even on Python 3.14 you don't have to do anything manual: just confirm the prompt (it defaults to Yes).</p>
   </div>
 
   <h4 class="sub">If you used the ZIP: run Unblock.bat first</h4>
@@ -891,7 +891,7 @@ python -m cctv_yolo.cli list-sessions</code></pre>
   <p>Run <strong>CCTV-YOLO-debug.bat</strong>. It launches the console-enabled build, keeps the window open, and captures every line of output — including native errors (DLL load failed, OpenMP conflicts, Qt platform-plugin failures) that never reach Python's crash handler — into <code>startup-output.log</code> next to the exe. Read that log to see exactly what failed.</p>
 
   <h3>The Windows build hangs or won't install PyTorch</h3>
-  <p>You're almost certainly building with an unsupported Python. PyTorch publishes <strong>no wheels for Python 3.13/3.14</strong>, so a build on them stalls. Use <strong>Python 3.10, 3.11, or 3.12</strong> — the build script now refuses newer versions, prefers the <code>py -3.12</code> launcher, and auto-recreates any build venv that was made with an unsupported Python.</p>
+  <p>You're almost certainly building with an unsupported Python. PyTorch publishes <strong>no wheels for Python 3.13/3.14</strong>, so a build on them stalls. Use <strong>Python 3.10, 3.11, or 3.12</strong> — the build script now refuses newer versions, prefers the <code>py -3.12</code> launcher, and auto-recreates any build venv that was made with an unsupported Python. If <strong>no supported Python is installed</strong>, the script <strong>offers to auto-install Python 3.12</strong> (downloaded from python.org, installed per-user with no admin rights) and then continues automatically — so on Python 3.14 you just confirm the prompt, which defaults to Yes, and do nothing else by hand.</p>
 
   <h3>First launch is very slow</h3>
   <p>That's the Mark-of-the-Web scan. Run <strong>Unblock.bat</strong> once after extracting the ZIP and subsequent launches are fast (see <a href="#install">Installation</a>).</p>
