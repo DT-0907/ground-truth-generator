@@ -425,9 +425,9 @@ kbd{
 
   <h3>GPU / CUDA at a glance</h3>
   <ul>
-    <li><strong>NVIDIA GPUs</strong> are auto-detected. The Windows build probes your card with <code>nvidia-smi</code> and picks the right CUDA wheel automatically, so detection uses the GPU when a compatible driver is present (~20× faster than CPU).</li>
+    <li><strong>NVIDIA GPUs</strong> are auto-detected. The Windows app ships with a universal CPU PyTorch and, on first launch, offers to download the matching CUDA build of PyTorch when it sees an NVIDIA card; after a restart the GPU runs ~20× faster than CPU.</li>
     <li><strong>Apple Silicon</strong> uses MPS automatically.</li>
-    <li><strong>Newer GPU generations</strong> need a newer CUDA runtime variant in the build, and a recent NVIDIA driver — for example, <strong>RTX 50-series (Blackwell) GPUs require <code>cu128</code> (CUDA 12.8+)</strong>. The full story — including how to tell <em>why</em> the app fell back to CPU — is in <a href="#gpu">GPU / CUDA &amp; performance</a>.</li>
+    <li><strong>Newer GPU generations</strong> need a more recent CUDA build and NVIDIA driver — for example, <strong>RTX 50-series (Blackwell) GPUs require <code>cu128</code> (CUDA 12.8+)</strong>. The full story — including the first-launch GPU setup and how to tell <em>why</em> the app fell back to CPU — is in <a href="#gpu">GPU / CUDA &amp; performance</a>.</li>
   </ul>
 
   <h3>Requirements</h3>
