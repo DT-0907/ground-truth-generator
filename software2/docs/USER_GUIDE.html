@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCTV-YOLO v2 — User Guide</title>
+<style>
+/* ============================================================
+   CCTV-YOLO User Guide — self-contained styles
+   Palette mirrors software2/cctv_yolo/theme.py exactly.
+   ============================================================ */
+:root{
+  --indigo:#15173D;     /* darkest, main background */
+  --purple:#982598;     /* action / primary accent  */
+  --pink:#E491C9;       /* highlight / completed     */
+  --offwhite:#F1E9E9;   /* text                      */
+  --panel:#1E2050;      /* cards, one tier above bg  */
+  --panel-hi:#2A2C66;   /* hovered / raised panel    */
+  --border:#2D2F60;     /* dividers, table grid      */
+  --muted:#A89BA8;      /* secondary text, hints     */
+  --error:#FF6B7A;      /* warm red                  */
+  --yellow:#F1C56B;     /* warm yellow (chips)       */
+  --teal:#7AC4D4;
+  --mint:#5DBB9B;
+  --radius:6px;         /* theme.RADIUS              */
+  --gap:12px;           /* theme.GAP                 */
+  --pad:10px;           /* theme.PAD                 */
+  --sidebar-w:288px;
+  --topbar-h:60px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0;
+  font-family:var(--font);
+  background:var(--indigo);
+  color:var(--offwhite);
+  font-size:15px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--pink);text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+/* ---------- Top bar ---------- */
+.topbar{
+  position:fixed;top:0;left:0;right:0;height:var(--topbar-h);z-index:50;
+  display:flex;align-items:center;gap:18px;padding:0 22px;
+  background:linear-gradient(90deg, rgba(21,23,61,0.96), rgba(30,32,80,0.96));
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.topbar .brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:18px;letter-spacing:.3px;white-space:nowrap;}
+.topbar .logo{
+  width:30px;height:30px;border-radius:8px;flex:0 0 auto;
+  background:linear-gradient(135deg,var(--purple),var(--pink));
+  display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--indigo);font-weight:800;
+  box-shadow:0 0 18px rgba(152,37,152,.45);
+}
+.topbar .ver{
+  font-size:11px;font-weight:700;letter-spacing:1px;color:var(--pink);
+  border:1px solid var(--border);border-radius:20px;padding:3px 11px;background:rgba(228,145,201,.08);
+}
+.topbar .spacer{flex:1;}
+#nav-search{
+  width:280px;max-width:38vw;padding:9px 14px;border-radius:20px;
+  border:1px solid var(--border);background:var(--panel);color:var(--offwhite);
+  font-size:13px;font-family:var(--font);outline:none;transition:border-color .15s, box-shadow .15s;
+}
+#nav-search::placeholder{color:var(--muted);}
+#nav-search:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(152,37,152,.25);}
+
+/* ---------- Sidebar ---------- */
+.sidebar{
+  position:fixed;top:var(--topbar-h);left:0;bottom:0;width:var(--sidebar-w);z-index:40;
+  overflow-y:auto;padding:22px 14px 60px;border-right:1px solid var(--border);
+  background:var(--indigo);
+}
+.sidebar::-webkit-scrollbar{width:9px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
+.sidebar h4{
+  font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--muted);
+  margin:20px 12px 7px;font-weight:700;
+}
+.sidebar h4:first-child{margin-top:0;}
+.sidebar a{
+  display:block;color:var(--offwhite);font-size:13.5px;padding:7px 12px;border-radius:var(--radius);
+  position:relative;transition:background .14s,color .14s;border-left:2px solid transparent;
+}
+.sidebar a:hover{background:var(--panel);text-decoration:none;color:var(--pink);}
+.sidebar a.active{
+  background:linear-gradient(90deg, rgba(152,37,152,.30), rgba(152,37,152,.05));
+  color:#fff;border-left:2px solid var(--pink);font-weight:600;
+}
+.sidebar a .num{display:inline-block;width:20px;color:var(--purple);font-weight:700;font-size:12px;}
+.sidebar a.active .num{color:var(--pink);}
+.sidebar a.hidden-by-search{display:none;}
+
+/* ---------- Main ---------- */
+main{
+  margin-left:var(--sidebar-w);padding:calc(var(--topbar-h) + 30px) 48px 120px;
+  max-width:1080px;
+}
+section{margin-bottom:72px;scroll-margin-top:calc(var(--topbar-h) + 18px);}
+section.fade{opacity:0;transform:translateY(14px);transition:opacity .5s ease, transform .5s ease;}
+section.fade.shown{opacity:1;transform:none;}
+
+h1{font-size:34px;line-height:1.2;margin:0 0 16px;font-weight:800;letter-spacing:-.5px;}
+h2{
+  font-size:25px;margin:0 0 18px;font-weight:750;letter-spacing:-.3px;
+  padding-bottom:12px;border-bottom:1px solid var(--border);
+}
+h2 .badge{
+  font-size:12px;font-weight:700;color:var(--indigo);background:var(--pink);
+  border-radius:20px;padding:2px 11px;margin-left:10px;vertical-align:middle;letter-spacing:.5px;
+}
+h3{font-size:19px;margin:34px 0 12px;font-weight:700;color:var(--pink);}
+h4.sub{font-size:15.5px;margin:22px 0 8px;font-weight:700;color:var(--offwhite);}
+p{margin:0 0 14px;}
+ul,ol{margin:0 0 16px;padding-left:24px;}
+li{margin-bottom:7px;}
+strong{color:#fff;font-weight:650;}
+.muted{color:var(--muted);}
+.lead{font-size:17px;color:var(--offwhite);}
+
+/* ---------- Hero ---------- */
+.hero{
+  background:
+    radial-gradient(900px 400px at 12% -10%, rgba(152,37,152,.35), transparent 60%),
+    radial-gradient(700px 360px at 95% 0%, rgba(228,145,201,.22), transparent 55%),
+    linear-gradient(160deg, var(--panel), var(--indigo));
+  border:1px solid var(--border);border-radius:14px;padding:42px 40px;margin-bottom:40px;
+  box-shadow:0 18px 60px rgba(0,0,0,.35);
+}
+.hero .eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--pink);font-weight:700;margin-bottom:14px;}
+.hero h1 .grad{
+  background:linear-gradient(100deg,var(--pink),var(--purple) 70%,var(--teal));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero p{font-size:17px;color:var(--offwhite);max-width:62ch;}
+.pillrow{display:flex;flex-wrap:wrap;gap:9px;margin-top:22px;}
+.pill{
+  font-size:12.5px;border:1px solid var(--border);background:rgba(30,32,80,.6);
+  border-radius:20px;padding:6px 14px;color:var(--offwhite);
+}
+.pill b{color:var(--pink);}
+
+/* ---------- Cards / grids ---------- */
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px 22px;margin:16px 0;
+}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.feat{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;border-top:3px solid var(--purple);
+}
+.feat h4{margin:0 0 7px;font-size:15px;color:#fff;}
+.feat.pink{border-top-color:var(--pink);}
+.feat.teal{border-top-color:var(--teal);}
+.feat.yellow{border-top-color:var(--yellow);}
+.feat.mint{border-top-color:var(--mint);}
+.feat p{margin:0;font-size:13.5px;color:var(--muted);}
+
+/* ---------- Tables ---------- */
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin:16px 0;}
+table{border-collapse:collapse;width:100%;font-size:14px;}
+thead th{
+  background:linear-gradient(180deg, var(--purple), #7d1f7d);
+  color:#fff;text-align:left;padding:11px 14px;font-weight:650;letter-spacing:.2px;
+  position:sticky;top:0;
+}
+tbody td{padding:10px 14px;border-top:1px solid var(--border);vertical-align:top;}
+tbody tr:nth-child(even){background:rgba(30,32,80,.4);}
+tbody tr:hover{background:rgba(228,145,201,.08);}
+td code,td kbd{white-space:nowrap;}
+.tcat{font-weight:700;color:var(--pink);}
+
+/* ---------- code / kbd ---------- */
+code{
+  font-family:var(--mono);font-size:.88em;background:rgba(45,47,96,.7);
+  border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:var(--pink);
+}
+pre{
+  background:#0F1130;border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 18px;overflow-x:auto;margin:16px 0;font-size:13px;line-height:1.6;
+}
+pre code{background:none;border:none;padding:0;color:var(--offwhite);}
+kbd{
+  font-family:var(--mono);font-size:12px;background:var(--panel-hi);
+  border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;
+  padding:2px 8px;color:#fff;box-shadow:0 1px 0 rgba(0,0,0,.4);white-space:nowrap;
+}
+
+/* ---------- callouts ---------- */
+.callout{
+  border-radius:var(--radius);padding:14px 18px 14px 16px;margin:18px 0;
+  border-left:4px solid var(--purple);background:rgba(152,37,152,.10);
+}
+.callout .clabel{font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;}
+.callout p:last-child{margin-bottom:0;}
+.callout.tip{border-left-color:var(--mint);background:rgba(93,187,155,.10);}
+.callout.tip .clabel{color:var(--mint);}
+.callout.warn{border-left-color:var(--error);background:rgba(255,107,122,.10);}
+.callout.warn .clabel{color:var(--error);}
+.callout.note{border-left-color:var(--teal);background:rgba(122,196,212,.10);}
+.callout.note .clabel{color:var(--teal);}
+
+/* ---------- workflow diagram ---------- */
+.flow{margin:26px 0;}
+.flow-stage{
+  display:flex;gap:18px;align-items:flex-start;position:relative;padding-bottom:8px;
+}
+.flow-rail{
+  flex:0 0 54px;display:flex;flex-direction:column;align-items:center;align-self:stretch;
+}
+.flow-dot{
+  width:46px;height:46px;border-radius:50%;flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff;
+  background:linear-gradient(135deg,var(--purple),var(--pink));
+  box-shadow:0 0 0 5px rgba(152,37,152,.15);
+}
+.flow-line{flex:1;width:2px;background:linear-gradient(var(--purple),var(--border));margin:6px 0;min-height:18px;}
+.flow-stage:last-child .flow-line{display:none;}
+.flow-body{
+  flex:1;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 20px;margin-bottom:18px;border-left:3px solid var(--pink);
+}
+.flow-body h4{margin:0 0 6px;font-size:16px;color:#fff;}
+.flow-body .where{font-size:12px;color:var(--pink);font-weight:600;letter-spacing:.3px;}
+.flow-body p{margin:8px 0 0;font-size:14px;}
+.flow-loop{
+  margin-top:8px;text-align:center;font-size:13px;color:var(--pink);font-weight:600;
+}
+.svg-flow{width:100%;height:auto;margin:20px 0;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px;}
+
+/* steptip */
+.steptip{font-size:12.5px;color:var(--mint);margin-top:8px;display:flex;gap:7px;}
+.steptip b{color:var(--mint);}
+
+/* swatches */
+.swatches{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0;}
+.swatch{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;width:118px;font-size:11px;}
+.swatch .chip{height:54px;}
+.swatch .meta{padding:7px 9px;background:var(--panel);}
+.swatch .meta b{display:block;color:#fff;font-size:12px;}
+.swatch .meta span{color:var(--muted);font-family:var(--mono);font-size:10.5px;}
+
+.divider{height:1px;background:var(--border);margin:40px 0;border:0;}
+
+/* ---------- responsive ---------- */
+.menu-toggle{display:none;}
+@media (max-width:980px){
+  :root{--sidebar-w:0px;}
+  .sidebar{
+    transform:translateX(-100%);transition:transform .25s;width:280px;
+    box-shadow:8px 0 40px rgba(0,0,0,.5);
+  }
+  .sidebar.open{transform:translateX(0);}
+  main{margin-left:0;padding:calc(var(--topbar-h) + 24px) 22px 100px;}
+  #nav-search{width:150px;}
+  .menu-toggle{display:flex;align-items:center;justify-content:center;width:38px;height:38px;
+    border-radius:8px;border:1px solid var(--border);background:var(--panel);color:#fff;cursor:pointer;font-size:18px;}
+  .grid2,.grid3{grid-template-columns:1fr;}
+}
+
+/* ---------- print ---------- */
+@media print{
+  :root{--sidebar-w:0;}
+  .topbar,.sidebar,.menu-toggle,#backtotop{display:none !important;}
+  main{margin:0;max-width:none;padding:0;}
+  body{background:#fff;color:#111;font-size:11.5pt;}
+  section{opacity:1 !important;transform:none !important;page-break-inside:avoid;margin-bottom:26px;}
+  h1,h2,h3,h4{color:#111 !important;page-break-after:avoid;}
+  h2{border-color:#999;}
+  .hero{background:#f4f4f8;border:1px solid #ccc;box-shadow:none;}
+  .hero h1 .grad{-webkit-text-fill-color:#7d1f7d;color:#7d1f7d;}
+  .card,.feat,.flow-body,.callout{background:#fafafa;border:1px solid #ccc;color:#111;}
+  .feat p,.muted,.flow-body .where{color:#444;}
+  thead th{background:#7d1f7d !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  code,kbd,pre{background:#eee;color:#222;border:1px solid #ccc;}
+  a{color:#7d1f7d;}
+  .flow-dot{background:#7d1f7d !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+#backtotop{
+  position:fixed;right:22px;bottom:22px;z-index:45;width:44px;height:44px;border-radius:50%;
+  background:var(--purple);color:#fff;border:none;cursor:pointer;font-size:18px;
+  box-shadow:0 6px 22px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .2s;
+}
+#backtotop.show{opacity:1;pointer-events:auto;}
+#backtotop:hover{background:var(--pink);color:var(--indigo);}
+</style>
+</head>
+<body>
+
+<!-- ====================== TOP BAR ====================== -->
+<header class="topbar">
+  <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation">☰</button>
+  <div class="brand"><span class="logo">CY</span> CCTV-YOLO</div>
+  <span class="ver">v2.1.0</span>
+  <span class="spacer"></span>
+  <input id="nav-search" type="search" placeholder="Filter the guide…" autocomplete="off" spellcheck="false">
+</header>
+
+<!-- ====================== SIDEBAR ====================== -->
+<nav class="sidebar" id="sidebar">
+  <h4>Get started</h4>
+  <a href="#intro"><span class="num">1</span>What is CCTV-YOLO</a>
+  <a href="#install"><span class="num">2</span>Installation &amp; first launch</a>
+  <a href="#datafolder"><span class="num">3</span>The data folder</a>
+  <h4>The nine tabs</h4>
+  <a href="#tab-preprocessing"><span class="num">4·1</span>Preprocessing</a>
+  <a href="#tab-batch"><span class="num">4·2</span>Batch</a>
+  <a href="#tab-correction"><span class="num">4·3</span>Correction &amp; Review</a>
+  <a href="#tab-performance"><span class="num">4·4</span>Performance</a>
+  <a href="#tab-analytics"><span class="num">4·5</span>Analytics</a>
+  <a href="#tab-insights"><span class="num">4·6</span>Insights</a>
+  <a href="#tab-training"><span class="num">4·7</span>Training</a>
+  <a href="#tab-models"><span class="num">4·8</span>Models</a>
+  <a href="#tab-live"><span class="num">4·9</span>Live</a>
+  <h4>Going deeper</h4>
+  <a href="#crosscutting"><span class="num">5</span>Cross-cutting features</a>
+  <a href="#shortcuts"><span class="num">6</span>Keyboard shortcuts</a>
+  <a href="#gpu"><span class="num">7</span>GPU / CUDA &amp; performance</a>
+  <a href="#troubleshooting"><span class="num">8</span>Troubleshooting</a>
+  <h4>Playbook</h4>
+  <a href="#workflow"><span class="num">★</span>The complete workflow</a>
+</nav>
+
+<main>
+
+<!-- ============ 1. INTRO ============ -->
+<section id="intro">
+  <div class="hero">
+    <div class="eyebrow">Ground-truth generator · YOLOv8 + ByteTrack</div>
+    <h1>Turn raw CCTV footage into <span class="grad">corrected, training-ready</span> traffic data.</h1>
+    <p class="lead">CCTV-YOLO is a native desktop app that detects and tracks vehicles in your camera footage, lets you fix the model's mistakes by hand, and feeds those corrections back into training a better model — over and over, until the model is good enough to do most of the work for you.</p>
+    <div class="pillrow">
+      <span class="pill"><b>9</b> purpose-built tabs</span>
+      <span class="pill"><b>10</b> export formats</span>
+      <span class="pill">Human-in-the-loop correction</span>
+      <span class="pill">Active-learning training loop</span>
+      <span class="pill">Runs offline, on your machine</span>
+    </div>
+  </div>
+
+  <h2>What problem does it solve?</h2>
+  <p>Traffic researchers sit on enormous archives of CCTV video — thousands of hours of intersections, roads, and lots. That footage is full of useful data (vehicle counts, turning movements, speeds, classes), but it is locked inside pixels. An off-the-shelf object detector like YOLOv8 can <em>start</em> to unlock it, but a generic model trained on web photos makes mistakes on your specific cameras: it misses occluded cars, confuses trucks for buses, loses a vehicle's identity behind a sign post, and counts the same car twice.</p>
+  <p><strong>CCTV-YOLO closes that gap.</strong> You run automatic detection across your footage, then a human reviewer corrects the errors in a fast keyboard-driven editor. Those corrections are the ground truth. You build a dataset from them, fine-tune a model, and the next batch of footage needs far fewer corrections. Each pass produces both a cleaner dataset <em>and</em> a smarter model — the active-learning flywheel.</p>
+
+  <h2>Who is it for?</h2>
+  <p>Traffic and transportation researchers, transportation engineers, and anyone who needs <strong>defensible, accurate vehicle-traffic ground truth</strong> from existing camera footage — not approximate estimates, but corrected, auditable per-track data they can export to standard annotation and training formats.</p>
+
+  <h2>The two ideas that drive the whole app</h2>
+  <div class="grid2">
+    <div class="feat pink">
+      <h4>Human-in-the-loop correction</h4>
+      <p>The model proposes; the human disposes. Detection output (<code>tracks</code>) is never overwritten — your edits live in a separate <code>corrections</code> layer. You can always see what the model did versus what's true, and roll back.</p>
+    </div>
+    <div class="feat">
+      <h4>Active learning</h4>
+      <p>You don't have to correct everything. The app ranks sessions by how uncertain the model is, so you spend your time where it matters most. Each correction round feeds a training round, and the model gets better at the cases you already fixed.</p>
+    </div>
+  </div>
+  <div class="callout note">
+    <span class="clabel">Note</span>
+    <p>This is a <strong>native PySide6/Qt desktop application</strong> — not a website or a Flask server. It runs entirely on your computer, works offline, and stores everything in a folder you control.</p>
+  </div>
+</section>
+
+<!-- ============ 2. INSTALL ============ -->
+<section id="install">
+  <h2>Installation &amp; first launch</h2>
+  <p>CCTV-YOLO ships as a self-contained desktop app for macOS and Windows. The bundle includes Python, Qt, OpenCV, PyTorch, and YOLOv8 — there is nothing to install separately.</p>
+
+  <h3>macOS</h3>
+  <ol>
+    <li>Open the <code>CCTV-YOLO.dmg</code> you were given.</li>
+    <li>Drag <strong>CCTV-YOLO.app</strong> into your <strong>Applications</strong> folder.</li>
+    <li>Launch it from Applications (or Spotlight). On first launch macOS Gatekeeper may ask you to confirm — right-click the app and choose <em>Open</em> if so.</li>
+  </ol>
+  <div class="callout note">
+    <span class="clabel">Note · First launch on another Mac</span>
+    <p>The <code>.app</code> is <strong>ad-hoc signed, not notarized</strong>. On a Mac other than the one it was built on, the first launch may be blocked by Gatekeeper — <strong>right-click the app → Open</strong> once to allow it. If macOS instead says the app is "damaged and can't be opened", that's the same Gatekeeper block: right-click → Open clears it (you only need to do this once).</p>
+  </div>
+  <div class="callout note">
+    <span class="clabel">Note · Apple Silicon</span>
+    <p>On M-series Macs, GPU acceleration through <strong>Apple Metal (MPS)</strong> turns on automatically — no driver, no setup. The build is a native arm64 bundle, so detection runs roughly 10× faster than CPU.</p>
+  </div>
+
+  <h3>Windows</h3>
+  <p>Two distribution shapes exist, depending on what you were handed:</p>
+  <ul>
+    <li><strong>Single-file installer</strong> — run <code>CCTV-YOLO-Setup.exe</code> and follow the prompts. It installs the app and creates a Start-menu / desktop shortcut. This is the easiest path.</li>
+    <li><strong>Folder build (ZIP)</strong> — extract the ZIP anywhere, then double-click <code>CCTV-YOLO.exe</code> inside it.</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="clabel">Building from source · Python 3.10–3.12 required</span>
+    <p>If you are <em>building</em> the Windows app (not just running a prebuilt one), you need <strong>Python 3.10, 3.11, or 3.12</strong>. Python <strong>3.13 / 3.14 have no PyTorch wheels</strong>, so a build on them will hang. The build script now <strong>refuses unsupported Python versions</strong>, prefers the <code>py -3.12</code> launcher, and will <strong>automatically recreate a build venv</strong> that was made with an unsupported Python.</p>
+  </div>
+
+  <h4 class="sub">If you used the ZIP: run Unblock.bat first</h4>
+  <p>When you download and extract a ZIP from a browser, Windows attaches a <strong>Mark-of-the-Web (MOTW)</strong> flag to every extracted file. On first launch, SmartScreen and Defender will run a full scan of the ~2.5 GB PyTorch/CUDA bundle, which can stall startup for 30–60 seconds.</p>
+  <ul>
+    <li>Double-click <strong>Unblock.bat</strong> once after extracting. It strips the MOTW flag from every file (safe and reversible — it changes no file content), so the app launches as fast as any local program from then on.</li>
+  </ul>
+  <div class="callout warn">
+    <span class="clabel">If the app won't open at all</span>
+    <p>Run <strong>CCTV-YOLO-debug.bat</strong>. It launches the console-enabled build, keeps the window open so you can read native crash messages (DLL load failures, Qt platform-plugin errors, OpenMP conflicts) that never reach the normal crash handler, and writes the full output to <code>startup-output.log</code> next to the exe. Send that log if you need help.</p>
+  </div>
+
+  <h3>The first-run wizard</h3>
+  <p>The very first time you launch — detected by the absence of a <code>.first_run_complete</code> marker in the data folder — a short wizard walks you through:</p>
+  <ol>
+    <li><strong>Welcome</strong> — what the app does.</li>
+    <li><strong>Data folder</strong> — choose where your videos, corrections, models, and exports live (see the next section).</li>
+    <li><strong>Model download</strong> — optionally fetch the small <code>yolov8n</code> base model so you can start detecting immediately.</li>
+    <li><strong>Tour</strong> — a quick overview of the tabs.</li>
+    <li><strong>Finish</strong> — writes the marker so the wizard doesn't show again.</li>
+  </ol>
+
+  <h3>GPU / CUDA at a glance</h3>
+  <ul>
+    <li><strong>NVIDIA GPUs</strong> are auto-detected. The Windows build probes your card with <code>nvidia-smi</code> and picks the right CUDA wheel automatically, so detection uses the GPU when a compatible driver is present (~20× faster than CPU).</li>
+    <li><strong>Apple Silicon</strong> uses MPS automatically.</li>
+    <li><strong>Newer GPU generations</strong> need a newer CUDA runtime variant in the build, and a recent NVIDIA driver — for example, <strong>RTX 50-series (Blackwell) GPUs require <code>cu128</code> (CUDA 12.8+)</strong>. The full story — including how to tell <em>why</em> the app fell back to CPU — is in <a href="#gpu">GPU / CUDA &amp; performance</a>.</li>
+  </ul>
+
+  <h3>Requirements</h3>
+  <div class="card">
+    <ul style="margin-bottom:0">
+      <li>macOS 12+ or Windows 10/11.</li>
+      <li>Optional: an NVIDIA GPU with current drivers for ~20× faster inference; Apple Silicon for ~10×.</li>
+      <li>Optional: Tailscale + an SMB share for NAS-mode video access (configured in <em>File → Settings</em>).</li>
+      <li>(For building from source only: Python 3.10–3.12 — 3.13/3.14 have no PyTorch wheels and are rejected by the build script.)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 3. DATA FOLDER ============ -->
+<section id="datafolder">
+  <h2>The data folder</h2>
+  <p>Everything you create lives in a single <strong>portable</strong> folder named <code>cctv-yolo/</code>, completely separate from where the <code>.exe</code> / <code>.app</code> itself is installed. You can move that folder (Documents → Desktop → an external drive) and the app finds it again on the next launch.</p>
+
+  <h3>Layout</h3>
+  <pre><code>&lt;cctv-yolo data folder&gt;/
+├── data/
+│   ├── videos/         raw input videos (.mp4 .mov .avi .mkv)
+│   ├── tracks/         YOLO + ByteTrack detection output JSON
+│   ├── corrections/    your edits (saved separately — never
+│   │                   overwrites tracks/); .bak/ keeps 5 versions
+│   ├── exports/        COCO / YOLO / CVAT / MOT / CSV / MP4 / PDF / zip
+│   │                   + insights/ + model_compare/ subfolders
+│   └── training/       dataset builds (ds_*) + run logs
+├── config/             model_config.json, nas.json, ui_state.json,
+│                       session_groups.json, training_history.json,
+│                       batch_registry.json, batch_session_map.json,
+│                       visual_index.json/.npy
+├── models/             *.pt + sidecar .meta.json for trained models
+├── logs/               app.log (rotating, 5 MB × 5 files)
+├── live/               snapshots/ + recordings/ from the Live tab
+├── .first_run_complete marker (presence = wizard already shown)
+└── crash.log           written only if startup crashes</code></pre>
+
+  <h3>How the path is resolved &amp; remembered</h3>
+  <p>On every launch the app picks the data root in this priority order:</p>
+  <ol>
+    <li><code>$CCTV_YOLO_DATA_DIR</code> environment variable — an explicit override that wins over everything else.</li>
+    <li>The path <strong>remembered from last launch</strong>. This marker is stored in the OS app-config location — <em>not</em> inside the data folder — so it survives even if you move or delete the data folder:
+      <ul>
+        <li>macOS: <code>~/Library/Application Support/CCTV-YOLO/data_root.txt</code></li>
+        <li>Windows: <code>%APPDATA%\CCTV-YOLO\data_root.txt</code></li>
+        <li>Linux: <code>~/.config/CCTV-YOLO/data_root.txt</code></li>
+      </ul>
+    </li>
+    <li>Source mode only (running <code>python run.py</code> from a checkout) — the repo root.</li>
+    <li>Auto-detect — the first existing folder named <code>cctv-yolo</code> in <code>~/Documents</code>, <code>~/Desktop</code>, or your home directory.</li>
+    <li>Default — create <code>~/Documents/cctv-yolo/</code>.</li>
+  </ol>
+  <div class="callout tip">
+    <span class="clabel">Tip · moving the data folder</span>
+    <p>Moved the folder and the app can't find it? Either set <code>CCTV_YOLO_DATA_DIR</code> before launching, or delete the remembered <code>data_root.txt</code> marker — the next launch re-searches and saves whatever it finds.</p>
+  </div>
+
+  <h3>"Open Folder" buttons everywhere</h3>
+  <p>Every tab has a small <strong>OpenLocationBar</strong> in its top-right corner. Each button reveals the relevant folder (or highlights a specific file) in Finder/Explorer with one click — so you are never hunting for "where did that export go?". Tooltips show the absolute path. The same shortcuts live in <em>File → Settings → Local Folders</em>, and <em>Help → Show Log Folder</em> jumps straight to <code>logs/</code>.</p>
+</section>
+
+<!-- ============ 4.1 PREPROCESSING ============ -->
+<section id="tab-preprocessing">
+  <h2>Preprocessing <span class="badge">Tab 1</span></h2>
+  <p>The Preprocessing tab is where you run <strong>automatic detection + tracking on a single video</strong> and watch it happen. It combines a video grid, a YOLO model picker, and live processing controls. Use it to spot-check a clip, dial in a confidence threshold, or process one important video carefully before committing to a bulk run.</p>
+
+  <h3>Walkthrough</h3>
+  <ul>
+    <li><strong>Model picker</strong> — a dropdown of every <code>.pt</code> in your <code>models/</code> folder, plus a <em>Browse…</em> button to pick one from elsewhere. This is how you choose which model does the detecting — your latest fine-tuned model or a stock <code>yolov8n/s/m</code>.</li>
+    <li><strong>Confidence slider</strong> — the minimum detection confidence. Lower it to catch more (and more uncertain) detections you'll review; raise it to keep only high-confidence boxes.</li>
+    <li><strong>Video grid</strong> — every video in <code>data/videos/</code> as a card. Each card shows a status badge (Queued / Processing / Done / Error) using the app's status colors, and a per-video <strong>Process</strong> control with a live <strong>progress bar and ETA</strong> you can <strong>cancel</strong> mid-run.</li>
+    <li><strong>ROI drawing</strong> — draw regions of interest on the selected video's preview before processing, so counts and analytics are scoped to the lanes/approaches you care about (see <a href="#cc-rois">ROIs</a>).</li>
+    <li><strong>Recent runs</strong> — a sidebar of what you just processed, so you can jump straight into reviewing it.</li>
+    <li>When a video finishes, the card offers <strong>Review</strong>, which opens the correction editor for that session.</li>
+  </ul>
+
+  <div class="callout note">
+    <span class="clabel">What it produces</span>
+    <p>Processing writes a <strong>tracks JSON</strong> to <code>data/tracks/</code>: per-frame bounding boxes in <code>[x1, y1, x2, y2]</code> (YOLO xyxy) format, grouped into tracks by ByteTrack. This is the raw model output — your starting material for correction.</p>
+  </div>
+  <div class="callout tip">
+    <span class="clabel">Ground-truth quality</span>
+    <p>For ground truth you generally want to detect <em>more</em> than you'll keep — set the confidence a little low so borderline vehicles surface as boxes you can confirm or delete, rather than silently missing them. A missed vehicle is invisible during review; an extra box is one keystroke to remove.</p>
+  </div>
+</section>
+
+<!-- ============ 4.2 BATCH ============ -->
+<section id="tab-batch">
+  <h2>Batch <span class="badge">Tab 2</span></h2>
+  <p>The Batch tab is the workhorse for <strong>processing many videos at once</strong>. Point it at any folder on disk and it builds a lazy tree view of every video inside, then chews through them in parallel with a scheduler you can resize on the fly. This is how you turn thousands of unread clips into tracks JSON without babysitting each one.</p>
+
+  <h3>Walkthrough</h3>
+  <ul>
+    <li><strong>📁 Pick Folder…</strong> — choose a source folder. The app builds a <code>QTreeView</code> of every video in it (and subfolders) and auto-ingests them so you can start immediately. <strong>⟳ Rescan</strong> re-reads the tree after you add files.</li>
+    <li><strong>Parallel workers</strong> — a spinbox from <strong>1 to 100</strong>. This sizes the thread pool: how many videos process simultaneously. Raise it on a strong GPU/CPU; lower it if the machine gets sluggish. You can change it mid-run.</li>
+    <li><strong>Stop after</strong> — process only the first N videos, then stop cleanly. Perfect for processing a "first chunk" of a huge archive (e.g. the first 100) before committing the whole batch.</li>
+    <li><strong>Confidence</strong> — the detection threshold for the whole batch.</li>
+    <li><strong>▶ Start All / ⏸ Pause / ✕ Cancel / 🧹 Clear Done</strong> — run, pause, atomically cancel in-flight work, and clear finished rows. Cancel is clean: partially-processed videos don't leave corrupt output.</li>
+  </ul>
+
+  <div class="callout note">
+    <span class="clabel">Persistence</span>
+    <p>Your active folder and which tree nodes were expanded are remembered in <code>config/batch_registry.json</code>. Every batch session is also recorded in <code>config/batch_session_map.json</code> so the app can always find the underlying video file regardless of where it lives on disk — including on a NAS share.</p>
+  </div>
+  <div class="callout tip">
+    <span class="clabel">Ground-truth quality</span>
+    <p>Bulk detection is cheap; reviewing is expensive. Process broadly here, then let the <a href="#tab-training">Training</a> tab's uncertainty ranking and the <a href="#tab-correction">Correction</a> tab's filters point you at the sessions actually worth a human's time.</p>
+  </div>
+</section>
+
+<!-- ============ 4.3 CORRECTION ============ -->
+<section id="tab-correction">
+  <h2>Correction &amp; Review <span class="badge">Tab 3</span></h2>
+  <p>This is the heart of the app — where a human turns raw model output into ground truth. The Correction tab itself is a <strong>dispatcher</strong>: it lists every session with stat cards (<em>Total Sessions</em>, <em>Needs Review</em>, <em>Corrected</em>) and filter buttons (<strong>All</strong> / <strong>Needs Review</strong> / <strong>Corrected</strong>). Click <strong>Review</strong> on a session — or <strong>Next Review</strong> to walk the queue — to open the full-screen <strong>Review window</strong> editor.</p>
+
+  <h3>The Review window editor</h3>
+  <p>A separate window with a toolbar on top, the video canvas in the center, a track sidebar on the right (resizable splitter), and frame controls along the bottom (play, step, slider, timeline minimap). Everything is keyboard-driven — see <a href="#shortcuts">shortcuts</a>.</p>
+  <ul>
+    <li><strong>Modes</strong> — <kbd>V</kbd> Select, <kbd>B</kbd> Draw box. Draw a new box to add a missing detection.</li>
+    <li><strong>Track edits</strong> — <kbd>D</kbd> Delete a bad track, <kbd>C</kbd> change its Class, <kbd>M</kbd> Merge two tracks that are the same vehicle, <kbd>S</kbd> Split a track that wrongly fused two vehicles.</li>
+    <li><strong>Box propagation</strong> — <kbd>N</kbd> / <kbd>P</kbd> copy the current box to the next / previous frame, so fixing a drifting box takes seconds.</li>
+    <li><strong>Gap interpolation on merge</strong> — when you merge two fragments separated by frames, the bbox is linearly interpolated across the gap and drawn dashed, so an occluded vehicle becomes one continuous track.</li>
+    <li><strong>ROIs</strong> — <kbd>Shift</kbd>+<kbd>R</kbd> rectangle, <kbd>Shift</kbd>+<kbd>P</kbd> polygon (double-click to close).</li>
+    <li><strong>Undo / Redo</strong> — <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> (snapshots of <code>{tracks, rois}</code>).</li>
+    <li><strong>Save</strong> — <kbd>Ctrl</kbd>+<kbd>S</kbd>.</li>
+  </ul>
+
+  <h3>Non-destructive saves</h3>
+  <div class="callout note">
+    <span class="clabel">Why this matters</span>
+    <p>Your edits are written to <code>data/corrections/</code> as a separate layer with a <code>"_version": 2</code> schema — the original <code>tracks/</code> file is <strong>never overwritten</strong>. Saves are <strong>atomic</strong> (a power loss mid-write can't corrupt the file) and keep the last <strong>5 rolling <code>.bak</code> backups</strong>. You can always compare what the model produced against what you corrected (that's exactly what the Before/After renderer uses), and you can recover an earlier version.</p>
+  </div>
+
+  <h3>Exporting from the Review window</h3>
+  <p>The <strong>Export…</strong> button opens a grouped menu with <strong>ten</strong> formats (in-memory state is used, so unsaved edits are included). Each export lands under <code>data/exports/&lt;session&gt;/&lt;format&gt;/</code> and the folder is revealed when done. Full descriptions of each format are in <a href="#cc-exports">Export formats</a>.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Annotation / detection</th><th>Tabular</th><th>Visual / package</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>COCO JSON<br>YOLO format<br>CVAT XML 1.1<br>MOT Challenge</td>
+          <td>CSV per-track stats<br>CSV per-frame detections</td>
+          <td>Annotated MP4<br>Per-track frame stills<br>Summary PDF<br>Review Pack (zip)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 4.4 PERFORMANCE ============ -->
+<section id="tab-performance">
+  <h2>Performance <span class="badge">Tab 4</span></h2>
+  <p>Performance answers "what's actually in this footage, and how good is my detection?" It shows traffic counts and detection statistics, and bundles three heavier analyses. It has a <strong>Single / Group toggle</strong> so you can look at one session or roll up a whole group (see <a href="#cc-groups">Groups</a>).</p>
+
+  <h3>Walkthrough</h3>
+  <ul>
+    <li><strong>Session / Group dropdown</strong> with a <strong>provenance badge</strong> — it tells you whether the numbers come from your <em>Corrections</em> (and how many edits) or fall back to raw <em>tracks</em>. Never guess which data you're looking at.</li>
+    <li><strong>Stat cards + breakdown tables</strong> — total counts and per-class counts, color-coded by vehicle type (car, truck, bus, motorcycle, bicycle…).</li>
+    <li><strong>ROI panel</strong> (single mode) — draw/select ROIs so counts are scoped to specific lanes or approaches.</li>
+    <li><strong>Model A/B Compare</strong> — run two models on the same video and diff their counts, mean confidence, and per-class breakdown side-by-side. Use it to prove a new model is better before you trust it.</li>
+    <li><strong>Before/After</strong> — render raw tracks vs. your corrections side-by-side with a divider; frames whose box sets differ get a red corner marker so the diff is obvious while scrubbing.</li>
+    <li><strong>Confusion Matrix</strong> — per-class precision/recall/F1 against your corrections as ground truth.</li>
+    <li><strong>Group membership panel</strong> (group mode) — see/manage which sessions are in the group.</li>
+  </ul>
+  <div class="callout tip">
+    <span class="clabel">Ground-truth quality</span>
+    <p>A confusion matrix here is your fastest read on dataset trouble: a hot off-diagonal "truck → bus" cell means your model (and possibly your corrections) are inconsistent about that distinction — fix it before you train, or the model will learn the confusion.</p>
+  </div>
+</section>
+
+<!-- ============ 4.5 ANALYTICS ============ -->
+<section id="tab-analytics">
+  <h2>Analytics <span class="badge">Tab 5</span></h2>
+  <p>Analytics turns a corrected session into research outputs. Its defining principle: <strong>every result renders inline</strong> — no "saved to disk and now invisible" outputs, no orphaned status labels. Before its first run each section shows a hint ("Click the button above to compute…"). It runs in <strong>Single</strong>, <strong>Group</strong> (aggregate over a group), or Multi-select mode.</p>
+
+  <h3>The nine sections</h3>
+  <div class="grid3">
+    <div class="feat"><h4>Path-density heatmap</h4><p>A PNG showing where vehicles travel most — instantly reveals the dominant paths through the scene.</p></div>
+    <div class="feat pink"><h4>OD matrix</h4><p>Origin–destination counts between ROIs: how many vehicles went from approach A to exit B. Written as CSV.</p></div>
+    <div class="feat teal"><h4>Time-series CSV</h4><p>Per-bucket counts (e.g. per-minute) — the raw material for flow charts and peak-hour analysis.</p></div>
+    <div class="feat yellow"><h4>Speed estimation</h4><p>Per-track speeds, using a pixels-per-meter value. Calibrate it automatically (see <a href="#cc-calibration">Calibration</a>).</p></div>
+    <div class="feat mint"><h4>Direction of travel</h4><p>Movement direction analysis for the tracks in the scene.</p></div>
+    <div class="feat"><h4>Annotated MP4</h4><p>Burns boxes, track IDs, ROI overlays, and a live counter into a video — optionally blurring license-plate regions.</p></div>
+    <div class="feat pink"><h4>Event clips + supercut</h4><p>Extracts a short clip per event (ROI entry/exit, anomaly, long dwell, speed outlier, user-flagged) and stitches a highlight reel.</p></div>
+    <div class="feat teal"><h4>Before/after playback</h4><p>The same raw-vs-corrected diff renderer as Performance, for visual QA of your edits.</p></div>
+    <div class="feat yellow"><h4>HTML session report</h4><p>A self-contained report: header, summary stats, embedded heatmap, OD table, time-series, top-10 speeds, anomalies — no template engine, opens in any browser.</p></div>
+  </div>
+  <div class="callout note">
+    <span class="clabel">Where outputs land</span>
+    <p>Heatmaps are PNG, OD/time-series are CSV, reports are HTML, clips and annotated video are MP4 — all under <code>data/exports/</code>. The OpenLocationBar reveals them.</p>
+  </div>
+</section>
+
+<!-- ============ 4.6 INSIGHTS ============ -->
+<section id="tab-insights">
+  <h2>Insights <span class="badge">Tab 6</span></h2>
+  <p>Insights is your "is this data good enough to train on?" dashboard. It has four sub-tabs that apply the <strong>same three panels</strong> — Dataset Health, Anomaly Detection, Confusion Matrix — at different scopes:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Sub-tab</th><th>Scope</th></tr></thead>
+      <tbody>
+        <tr><td class="tcat">Session</td><td>One chosen processed session.</td></tr>
+        <tr><td class="tcat">Group</td><td>Every session inside a named group.</td></tr>
+        <tr><td class="tcat">Dataset</td><td>A built YOLO dataset folder under <code>data/training/</code>.</td></tr>
+        <tr><td class="tcat">Multi</td><td>An ad-hoc multi-select of sessions for one-off comparisons.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The three panels</h3>
+  <ul>
+    <li><strong>Dataset Health</strong> — class &amp; subclass balance, bbox-size distribution (small/medium/large by COCO conventions), median area &amp; aspect ratio, frame coverage, and train/val split counts. It raises plain-English warnings: "Class X is 1.5%", "85% imbalanced", "&lt;200 total bboxes", "small bboxes dominate", "no val set yet". <strong>Run this before every training run</strong> to catch bias.</li>
+    <li><strong>Anomaly Detection</strong> — builds a per-ROI, per-hour-of-day baseline (count, class-mix, mean speed) across all sessions and flags any session whose values fall outside mean ± N·σ. Time-of-day is inferred from the session's processed-at timestamp plus the event's offset in the clip. Without ROIs it falls back to whole-frame stats.</li>
+    <li><strong>Confusion Matrix</strong> — held-out evaluation: pick a session whose corrections are kept aside, run the model fresh on the video, match predictions to corrections per-frame by IoU (≥ 0.5 = true positive; class mismatch = confusion; unmatched corrections = false negatives; unmatched predictions = false positives), and render the matrix and per-class metrics.</li>
+  </ul>
+  <div class="callout note">
+    <span class="clabel">History</span>
+    <p>Each panel's results are saved under <code>data/exports/insights/…</code> and re-loadable from a History dropdown beside the panel.</p>
+  </div>
+</section>
+
+<!-- ============ 4.7 TRAINING ============ -->
+<section id="tab-training">
+  <h2>Training <span class="badge">Tab 7</span></h2>
+  <p>The Training tab is where corrections become a model. It runs the active-learning loop: rank what to review, build a dataset from corrections, fine-tune a YOLO model, and promote the result.</p>
+
+  <h3>Active-learning queue</h3>
+  <p>The top table ranks <strong>uncorrected</strong> sessions by uncertainty — sessions with low mean confidence, lots of short fragments, and many <code>needs_review</code> flags score highest (most interesting to review). Sorted worst-first, it tells you exactly where your next correction effort buys the most accuracy.</p>
+
+  <h3>Build a dataset</h3>
+  <p>Choose a <strong>build mode</strong>:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Mode</th><th>What it includes</th></tr></thead>
+      <tbody>
+        <tr><td class="tcat">All corrected</td><td>Every session that has corrections.</td></tr>
+        <tr><td class="tcat">Unused since last build</td><td><strong>Only sessions corrected since your last successful training build</strong> — the active-learning incremental dataset.</td></tr>
+        <tr><td class="tcat">Manual selection</td><td>An explicit list of sessions you pick.</td></tr>
+        <tr><td class="tcat">Combine existing datasets</td><td>Merge previously-built <code>ds_*</code> datasets into one.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Build parameters: <strong>Sample every N frames</strong> (annotation stride), <strong>val split</strong> (0.05–0.30, default 0.10), <strong>Filter to ROI</strong> (only annotate tracks intersecting an ROI), <strong>Base model</strong> (<code>yolov8n/s/m/l</code>), <strong>Epochs</strong> (default 30), and <strong>Image size</strong>. The build samples annotated frames into a YOLO-format dataset (<code>images/</code> + <code>labels/</code> + <code>data.yaml</code> with your class names) under <code>data/training/ds_&lt;id&gt;/</code>, with an automatic train/val split.</p>
+
+  <h3>Train &amp; promote</h3>
+  <p>Training runs <strong>in-process via the Ultralytics API</strong> and streams loss and metrics into the UI so you can watch progress live. (This works inside the packaged app — the older subprocess approach that shelled out to the <code>yolo</code> CLI only worked in a dev checkout.) When it finishes, the best weights (<code>best.pt</code>) are copied into <code>models/</code> as a timestamped <code>.pt</code>, and you get a <strong>promote prompt</strong> to make it the active model. The model pickers in Preprocessing, Live, and Models pick it up automatically.</p>
+  <div class="callout tip">
+    <span class="clabel">Why "Unused since last build" is the key</span>
+    <p>It means each training round only re-learns from the <em>new</em> work you've done — no re-feeding the same sessions, no manual bookkeeping. The app reads <code>training_history.json</code> to know what's already been used. This is what makes the flywheel in the <a href="#workflow">complete workflow</a> turn cleanly.</p>
+  </div>
+</section>
+
+<!-- ============ 4.8 MODELS ============ -->
+<section id="tab-models">
+  <h2>Models <span class="badge">Tab 8</span></h2>
+  <p>Models manages the <code>.pt</code> files in your <code>models/</code> folder and runs head-to-head comparisons.</p>
+
+  <h3>Walkthrough</h3>
+  <ul>
+    <li><strong>Models table</strong> — columns for <em>filename</em>, <em>size</em>, <em>inference speed</em> (ms/frame, cached), an <em>Active</em> badge marking the current default, and <em>source provenance</em> (from a <code>.meta.json</code> sidecar) so you can see which dataset a trained model came from.</li>
+    <li><strong>Right-click</strong> a model to <strong>Delete</strong> or <strong>Rename</strong> (rename keeps the active flag in sync).</li>
+    <li><strong>Download YOLOv8…</strong> — fetches stock weights from Ultralytics. The downloader is a hardened pure-Python implementation: retries with backoff, two mirrors (GitHub Releases, then HuggingFace), resume support for interrupted downloads, and plain-English errors instead of opaque curl codes.</li>
+    <li><strong>A/B comparison</strong> — run two models against either a <strong>single video</strong> or a <strong>dataset's val split</strong>, and see the diff. Every comparison is saved as JSON under <code>data/exports/model_compare/</code> and re-loadable from a <strong>History</strong> picker.</li>
+  </ul>
+  <div class="callout tip">
+    <span class="clabel">Ground-truth quality</span>
+    <p>Comparing on a <em>val split</em> (held-out frames the model never trained on) is the honest way to know whether iteration N+1 is genuinely better than iteration N — not just better at memorizing the training frames.</p>
+  </div>
+</section>
+
+<!-- ============ 4.9 LIVE ============ -->
+<section id="tab-live">
+  <h2>Live <span class="badge">Tab 9</span></h2>
+  <p>Live runs detection on a real-time stream — a <strong>webcam</strong> or an <strong>RTSP</strong> camera URL — for monitoring and quick model sanity checks. It's deliberately minimal and research-grade.</p>
+
+  <h3>Walkthrough</h3>
+  <ul>
+    <li><strong>Source</strong> — pick a webcam index or paste an RTSP URL. The last source (and its ROIs) are remembered per source.</li>
+    <li><strong>A/B model compare on live</strong> — run two models on the same frames side-by-side; model B can be throttled to every Nth frame to save compute.</li>
+    <li><strong>ROIs + alerts</strong> — draw ROIs on the live view and get <strong>entry / exit / dwell</strong> alerts with per-ROI live counts.</li>
+    <li><strong>Recording</strong> — record manually, or <strong>automatically on an event</strong> (e.g. when a vehicle enters an ROI). Recordings and snapshots land in <code>live/</code>.</li>
+    <li><strong>Overlays &amp; resilience</strong> — an FPS / inference-ms overlay, a 10-second RTSP connect-timeout toast, and an auto-reconnect banner with exponential backoff for flaky streams.</li>
+  </ul>
+  <div class="callout note">
+    <span class="clabel">Note</span>
+    <p>Live is for monitoring and spot-checking a model in the field. The ground-truth pipeline itself runs on recorded files through Preprocessing/Batch → Correction → Training.</p>
+  </div>
+</section>
+
+<!-- ============ 5. CROSS-CUTTING ============ -->
+<section id="crosscutting">
+  <h2>Cross-cutting features</h2>
+  <p>These features aren't a single tab — they thread through the whole app.</p>
+
+  <h3 id="cc-groups">Groups</h3>
+  <p>Tag sessions by an attribute — <em>Snow</em>, <em>Night</em>, <em>Intersection-3</em>, whatever you research by — and the app rolls aggregated stats up through Performance, Analytics, Insights, and Training. Create, rename, recolor, and add/remove members; groups are stored in <code>config/session_groups.json</code>. Use them to compare conditions ("are night counts anomalous?") or to build a dataset from only one condition.</p>
+
+  <h3 id="cc-rois">ROIs — draw once, respected everywhere</h3>
+  <p>Regions of interest (rectangles or polygons) are drawn in Preprocessing or Correction and then <strong>respected by every downstream tab and every export</strong>: per-ROI counts, OD matrices, ROI-scoped dataset builds, live alerts. Multiple ROIs on a canvas get distinct palette colors. ROIs are why a "count" can mean "northbound left-turn lane" instead of "the whole frame" — essential for traffic ground truth.</p>
+
+  <h3>Occlusion / track-gap handling</h3>
+  <p>When a vehicle passes behind a sign, pillar, or another vehicle, the tracker often splits it into two fragments. The app finds likely "same vehicle through a gap" pairs and presents a <strong>ranked merge-candidate dialog</strong> with a confidence score and predicted gap location. Accept a pair and it routes through the normal merge code — gap frames are interpolated and tagged <code>"occluded": true</code> so they show up distinctly in the timeline minimap and on the canvas. This keeps one physical vehicle as one track, which is what counts and trajectories depend on.</p>
+
+  <h3>Cross-session visual / CLIP search <kbd>Ctrl</kbd>+<kbd>F</kbd></h3>
+  <p>Two search surfaces:</p>
+  <ul>
+    <li><strong>Attribute search</strong> — find tracks across all sessions by class, ROI membership, time-of-day, confidence range, or track length (a pure-data scan, no video reads; results link back to a review window).</li>
+    <li><strong>Visual similarity</strong> — build an embedding index over vehicle crops, then query by <em>image</em> (pick a track, find similar ones everywhere) or by <em>text</em> ("red truck", "police car") when CLIP is available. It tries <code>open_clip</code> first (best, text + image), falls back to a ResNet50 backbone (image-only), and surfaces a helpful message if neither is installed. Cached at <code>config/visual_index.json</code>/<code>.npy</code>.</li>
+  </ul>
+
+  <h3>Anomaly detection</h3>
+  <p>Learns a baseline of normal traffic per ROI and hour-of-day across your sessions, then flags outliers. See the <a href="#tab-insights">Insights</a> tab.</p>
+
+  <h3>Auto-clips &amp; supercut</h3>
+  <p>From the <a href="#tab-analytics">Analytics</a> tab, extract a short annotated MP4 per event and optionally concatenate them into one highlight reel. Event types: <code>roi_entry</code>, <code>roi_exit</code>, <code>anomaly</code>, <code>long_dwell</code>, <code>speed_outlier</code>, <code>user_flag</code>.</p>
+
+  <h3 id="cc-calibration">Calibration (pixels-per-meter)</h3>
+  <p>Speed estimation needs a pixels-per-meter scale. The app computes it two ways and reports both so you can choose: a fast <strong>track-velocity heuristic</strong> (assumes median car speed ≈ 13.4 m/s / 30 mph), and a more accurate <strong>vanishing-point geometry</strong> method (Hough lines → RANSAC vanishing point → median car bbox height ≈ 1.5 m sedan).</p>
+
+  <h3>Alerts</h3>
+  <p>A simple rule engine (used by the <a href="#tab-live">Live</a> tab) that tracks per-track state and fires entry / exit / dwell alerts.</p>
+
+  <h3 id="cc-exports">Export formats — what each is for</h3>
+  <p>Ten formats from the Review window's <strong>Export…</strong> menu. Pick by what consumes the output downstream:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Format</th><th>What it is &amp; who consumes it</th></tr></thead>
+      <tbody>
+        <tr><td class="tcat">COCO JSON</td><td>The standard object-detection annotation format. Feeds most training pipelines and detection toolkits; ROI-scopable.</td></tr>
+        <tr><td class="tcat">YOLO format</td><td>Per-image <code>.txt</code> label files + class list — the exact layout Ultralytics YOLO trains on. Drop straight into a training run.</td></tr>
+        <tr><td class="tcat">CVAT XML 1.1</td><td>Import into <strong>CVAT</strong> (the open-source annotation tool) to continue or audit annotation there.</td></tr>
+        <tr><td class="tcat">MOT Challenge</td><td>Multi-Object-Tracking benchmark format — for evaluating/your tracking against MOT metrics and tools.</td></tr>
+        <tr><td class="tcat">CSV per-track stats</td><td>One row per track (class, length, etc.) — drop into Excel / pandas / R for analysis.</td></tr>
+        <tr><td class="tcat">CSV per-frame detections</td><td>One row per detection per frame — the granular table for custom flow/speed scripts.</td></tr>
+        <tr><td class="tcat">Annotated MP4</td><td>A video with boxes, track IDs, ROI overlays, and a live counter burned in — for presentations and visual QA (optional plate blur).</td></tr>
+        <tr><td class="tcat">Per-track frame stills</td><td>Cropped/sampled frame images per track — for inspection or building image datasets.</td></tr>
+        <tr><td class="tcat">Summary PDF</td><td>A printable one-look summary of the session's counts and stats.</td></tr>
+        <tr><td class="tcat">Review Pack (zip)</td><td>A bundle of the above for handing a finished session to a colleague or archiving the deliverable.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="cc-cli">Headless CLI</h3>
+  <p>Every GUI pipeline also runs from the command line against the same data root — for servers, cron jobs, and scripting:</p>
+  <pre><code>python -m cctv_yolo.cli process --folder /path/to/videos --recursive
+python -m cctv_yolo.cli process /path/to/video.mp4 --model yolov8m.pt
+python -m cctv_yolo.cli annotate &lt;session_id&gt;
+python -m cctv_yolo.cli heatmap &lt;session_id&gt;
+python -m cctv_yolo.cli timeseries &lt;session_id&gt; --bucket 60
+python -m cctv_yolo.cli speeds &lt;session_id&gt; --ppm 22.5
+python -m cctv_yolo.cli report &lt;session_id&gt;
+python -m cctv_yolo.cli train --epochs 30 --base yolov8n.pt
+python -m cctv_yolo.cli list-sessions</code></pre>
+</section>
+
+<!-- ============ 6. SHORTCUTS ============ -->
+<section id="shortcuts">
+  <h2>Keyboard shortcuts</h2>
+  <h3>Review window</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Key</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>Space</kbd></td><td>Play / Pause</td></tr>
+        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Step frame</td></tr>
+        <tr><td><kbd>V</kbd> / <kbd>B</kbd></td><td>Select mode / Draw box mode</td></tr>
+        <tr><td><kbd>D</kbd></td><td>Delete track</td></tr>
+        <tr><td><kbd>C</kbd></td><td>Change class</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Merge tracks</td></tr>
+        <tr><td><kbd>S</kbd></td><td>Split track</td></tr>
+        <tr><td><kbd>N</kbd> / <kbd>P</kbd></td><td>Copy box to next / previous frame</td></tr>
+        <tr><td><kbd>R</kbd></td><td>Next review session</td></tr>
+        <tr><td><kbd>Shift</kbd>+<kbd>R</kbd></td><td>ROI rectangle mode</td></tr>
+        <tr><td><kbd>Shift</kbd>+<kbd>P</kbd></td><td>ROI polygon mode (double-click closes)</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Undo / Redo</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save corrections</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Cancel / return to Select mode</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Main window</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Key</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>I</kbd></td><td>Import video</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Cross-session search</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Settings</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Show this shortcut list</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Q</kbd></td><td>Quit</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd></td><td>Preprocessing</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>Correction</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>3</kbd></td><td>Performance</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>4</kbd></td><td>Batch</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>5</kbd></td><td>Analytics</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>6</kbd></td><td>Training</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>7</kbd></td><td>Models</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>8</kbd></td><td>Live</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>9</kbd></td><td>Insights</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 7. GPU ============ -->
+<section id="gpu">
+  <h2>GPU / CUDA &amp; performance</h2>
+  <p>Detection is the slow part. A GPU makes it roughly <strong>20× faster</strong> (NVIDIA/CUDA) or <strong>10× faster</strong> (Apple MPS) than CPU, so getting the GPU working is the single biggest speed lever.</p>
+
+  <h3>How to tell what device is in use</h3>
+  <ul>
+    <li>The <strong>status bar</strong> shows the active device (e.g. <em>NVIDIA GeForce RTX 3060 (CUDA 11.8)</em>, <em>Apple Metal (MPS)</em>, or <em>CPU</em>).</li>
+    <li><strong>Help → About</strong> shows the same device string alongside version and platform.</li>
+    <li>Processing logs record it too, in one consistent voice.</li>
+  </ul>
+
+  <h3>The three reasons it falls back to CPU</h3>
+  <p>If you see "CPU" when you expected the GPU, the app tells you <em>which</em> of these you hit:</p>
+  <ol>
+    <li><strong>CPU-only PyTorch was bundled.</strong> The build doesn't contain CUDA support at all → rebuild with a CUDA variant (the Windows build script defaults to one).</li>
+    <li><strong>CUDA PyTorch is bundled, but no usable NVIDIA GPU is visible.</strong> Usually the NVIDIA <strong>driver is older</strong> than the bundled CUDA runtime needs → update your driver, or rebuild with a CUDA variant matching your driver.</li>
+    <li><strong>Driver too old for the bundled CUDA runtime.</strong> The most common Windows case — <code>nvidia-smi</code> shows the GPU, but the app runs on CPU because the wheel's CUDA runtime needs a newer driver.</li>
+  </ol>
+  <p>A related case: your GPU is <em>newer</em> than the CUDA build that was bundled (e.g. an RTX 50-series Blackwell card running a <code>cu124</code> build). The app now <strong>detects this and reports CPU-with-a-reason</strong> — telling you to "rebuild with <code>cu128</code>" — instead of crashing.</p>
+
+  <h3>NVIDIA: matching the CUDA variant to your driver</h3>
+  <p>The Windows build can be produced with different CUDA wheel variants. The build script <strong>auto-detects your GPU via <code>nvidia-smi</code> and picks the right wheel automatically</strong>; you only need to think about variants when building for a different machine or overriding the choice. Newer variants support newer GPUs but require newer drivers:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Variant</th><th>Driver / GPU notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>cu118</code></td><td>Broadest compatibility — works with any NVIDIA driver ≥ 452.39 on Windows. The safe fallback for older cards / mixed hardware.</td></tr>
+        <tr><td><code>cu121</code></td><td>Newer GPUs; needs driver ≥ 528.33.</td></tr>
+        <tr><td><code>cu124</code></td><td>Newer still; needs a more recent driver.</td></tr>
+        <tr><td><code>cu126</code></td><td>Recent cards; needs a recent driver.</td></tr>
+        <tr><td><code>cu128</code></td><td><strong>Required for RTX 50-series (Blackwell)</strong> — CUDA 12.8+; needs the newest driver.</td></tr>
+        <tr><td><code>cpu</code></td><td>No GPU; ~250 MB instead of ~2.5 GB.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout note">
+    <span class="clabel">Newest GPUs (Blackwell / RTX 50-series)</span>
+    <p>RTX 50-series (Blackwell) cards <strong>require <code>cu128</code> (CUDA 12.8+)</strong> and the newest NVIDIA driver. Older cards use <code>cu124</code>, <code>cu121</code>, or <code>cu118</code>. The build auto-detects the right one; if a card is <em>newer</em> than the bundled build, the app reports "running on CPU — rebuild with <code>cu128</code>" instead of crashing.</p>
+  </div>
+  <div class="callout tip">
+    <span class="clabel">Tip · overriding the auto-detected variant</span>
+    <p>To force a specific wheel (e.g. building on a machine without the target GPU, or distributing to mixed hardware), set the <code>CCTV_YOLO_TORCH_VARIANT</code> environment variable before building — e.g. <code>cu128</code> for Blackwell, or <code>cu118</code> for the widest driver compatibility.</p>
+  </div>
+
+  <h3>Apple Silicon (MPS)</h3>
+  <p>On M1/M2/M3 Macs, Metal acceleration is enabled automatically via <code>torch.backends.mps</code> — no install, no configuration. The status bar will say <em>Apple Metal (MPS)</em>.</p>
+</section>
+
+<!-- ============ 8. TROUBLESHOOTING ============ -->
+<section id="troubleshooting">
+  <h2>Troubleshooting</h2>
+
+  <h3>The exe won't open (Windows)</h3>
+  <p>Run <strong>CCTV-YOLO-debug.bat</strong>. It launches the console-enabled build, keeps the window open, and captures every line of output — including native errors (DLL load failed, OpenMP conflicts, Qt platform-plugin failures) that never reach Python's crash handler — into <code>startup-output.log</code> next to the exe. Read that log to see exactly what failed.</p>
+
+  <h3>The Windows build hangs or won't install PyTorch</h3>
+  <p>You're almost certainly building with an unsupported Python. PyTorch publishes <strong>no wheels for Python 3.13/3.14</strong>, so a build on them stalls. Use <strong>Python 3.10, 3.11, or 3.12</strong> — the build script now refuses newer versions, prefers the <code>py -3.12</code> launcher, and auto-recreates any build venv that was made with an unsupported Python.</p>
+
+  <h3>First launch is very slow</h3>
+  <p>That's the Mark-of-the-Web scan. Run <strong>Unblock.bat</strong> once after extracting the ZIP and subsequent launches are fast (see <a href="#install">Installation</a>).</p>
+
+  <h3>GPU isn't being used</h3>
+  <p>Check the status bar / About dialog for the device string and the CPU-fallback reason, then follow the matching fix in <a href="#gpu">GPU / CUDA</a> — almost always "update your NVIDIA driver".</p>
+
+  <h3>Where the logs live</h3>
+  <ul>
+    <li><strong>app.log</strong> — the rotating runtime log (5 MB × 5 files) in <code>&lt;data folder&gt;/logs/</code>. Jump there via <em>Help → Show Log Folder</em>.</li>
+    <li><strong>crash.log</strong> — written at the data-folder root only if startup itself crashes.</li>
+    <li><strong>startup-output.log</strong> — produced by <code>CCTV-YOLO-debug.bat</code>, next to the exe.</li>
+  </ul>
+
+  <h3>The app can't find my data</h3>
+  <p>You probably moved the data folder. Set <code>CCTV_YOLO_DATA_DIR</code> to its new location before launching, or delete the remembered <code>data_root.txt</code> marker so the app re-searches (see <a href="#datafolder">The data folder</a>).</p>
+</section>
+
+<!-- ============ 9. WORKFLOW ============ -->
+<section id="workflow">
+  <h2>The complete workflow <span class="badge">★ Playbook</span></h2>
+  <p class="lead">From thousands of unread, batched videos to a trained model — and back again. This is the active-learning flywheel, end to end. Each loop produces a cleaner dataset <em>and</em> a smarter model, and the correction effort drops every time around.</p>
+
+  <!-- SVG flywheel -->
+  <svg class="svg-flow" viewBox="0 0 760 230" role="img" aria-label="Active-learning flywheel diagram">
+    <defs>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#982598"/><stop offset="1" stop-color="#E491C9"/>
+      </linearGradient>
+      <marker id="arr" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#E491C9"/>
+      </marker>
+    </defs>
+    <!-- nodes -->
+    <g font-family="sans-serif" font-size="12" fill="#F1E9E9" text-anchor="middle">
+      <g>
+        <rect x="20"  y="40" width="120" height="56" rx="8" fill="#1E2050" stroke="#982598"/>
+        <text x="80" y="64" font-weight="700" fill="#E491C9">Ingest</text>
+        <text x="80" y="82">videos → folder</text>
+      </g>
+      <g>
+        <rect x="180" y="40" width="120" height="56" rx="8" fill="#1E2050" stroke="#982598"/>
+        <text x="240" y="64" font-weight="700" fill="#E491C9">Bulk detect</text>
+        <text x="240" y="82">Batch → tracks</text>
+      </g>
+      <g>
+        <rect x="340" y="40" width="120" height="56" rx="8" fill="#1E2050" stroke="#982598"/>
+        <text x="400" y="60" font-weight="700" fill="#E491C9">Correct</text>
+        <text x="400" y="76">~100 sessions</text>
+        <text x="400" y="90" font-size="10" fill="#A89BA8">(human-in-loop)</text>
+      </g>
+      <g>
+        <rect x="500" y="40" width="120" height="56" rx="8" fill="#1E2050" stroke="#982598"/>
+        <text x="560" y="64" font-weight="700" fill="#E491C9">Build dataset</text>
+        <text x="560" y="82">ds_NNN</text>
+      </g>
+      <g>
+        <rect x="500" y="140" width="120" height="56" rx="8" fill="#1E2050" stroke="#982598"/>
+        <text x="560" y="164" font-weight="700" fill="#E491C9">Train + promote</text>
+        <text x="560" y="182">better model</text>
+      </g>
+      <g>
+        <rect x="180" y="140" width="240" height="56" rx="8" fill="#1E2050" stroke="#E491C9" stroke-dasharray="5 4"/>
+        <text x="300" y="164" font-weight="700" fill="#E491C9">Point new model at NEXT batch</text>
+        <text x="300" y="182" font-size="10" fill="#A89BA8">fewer corrections needed each loop</text>
+      </g>
+    </g>
+    <!-- arrows -->
+    <g fill="none" stroke="#E491C9" stroke-width="2" marker-end="url(#arr)">
+      <path d="M140,68 L176,68"/>
+      <path d="M300,68 L336,68"/>
+      <path d="M460,68 L496,68"/>
+      <path d="M560,96 L560,136"/>
+      <path d="M500,168 L424,168"/>
+      <path d="M180,160 C90,160 90,96 176,76"/>
+    </g>
+    <text x="120" y="124" font-family="sans-serif" font-size="11" fill="#5DBB9B" text-anchor="middle">↺ repeat</text>
+  </svg>
+
+  <div class="callout tip">
+    <span class="clabel">The flywheel in one sentence</span>
+    <p>Detect everything cheaply → correct the most uncertain ~100 sessions by hand → build a dataset from <em>only those new corrections</em> → train → promote the better model → run it on the next batch (which now needs fewer corrections) → repeat.</p>
+  </div>
+
+  <!-- staged playbook -->
+  <div class="flow">
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">A</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">data/videos/ · or Batch tab · or NAS</span>
+        <h4>Ingest — get the footage in reach</h4>
+        <p>Drop your archive of videos into the <code>data/videos/</code> folder, or simply point the <strong>Batch</strong> tab at any folder on disk (or a Tailscale-mounted NAS share). You don't need to copy thousands of files in — Batch reads them where they live and remembers the mapping.</p>
+        <div class="steptip"><b>Tip:</b> Keep videos on a fast local drive or a well-connected NAS — disk read speed is part of throughput.</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">B</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Batch tab (Ctrl+4)</span>
+        <h4>Bulk auto-detect — let YOLO do the first pass</h4>
+        <p>In Batch, set <strong>Parallel workers</strong> as high as your hardware allows, optionally set <strong>Stop after</strong> to process a first chunk (say 100 videos), and hit <strong>▶ Start All</strong>. Every video gets a tracks JSON. On the first iteration use a stock model (<code>yolov8n</code> from the wizard download); on later iterations use your promoted model.</p>
+        <div class="steptip"><b>Tip:</b> Process the whole archive if you can — detection is cheap and you can review only a subset. More tracks = more material to mine with search and analytics later.</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">C</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Correction tab (Ctrl+2) → Review window</span>
+        <h4>Review &amp; correct the first ~100 sessions — make ground truth</h4>
+        <p>This is the human-in-the-loop core. In Correction, filter to <strong>Needs Review</strong> (or let <a href="#tab-training">Training</a>'s uncertainty ranking tell you what's worst), open the Review window, and fix: tighten boxes, correct classes (<kbd>C</kbd>), <kbd>M</kbd>erge/<kbd>S</kbd>plit tracks, accept occlusion merges, and draw <strong>ROIs</strong> for your lanes/approaches. Save with <kbd>Ctrl</kbd>+<kbd>S</kbd>. Saves are non-destructive — the raw tracks survive.</p>
+        <div class="steptip"><b>Tip:</b> Be consistent about class boundaries (van = car? pickup = truck?). Consistency in your corrections is what the model actually learns — check the confusion matrix to catch your own drift.</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">D</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Training tab (Ctrl+6) → "Unused since last build"</span>
+        <h4>Build dataset #1 — turn corrections into a YOLO dataset</h4>
+        <p>In Training choose build mode <strong>Unused since last build</strong> and click build. It includes <em>only</em> the sessions you just corrected, samples annotated frames (your stride), applies the <strong>val split</strong>, and writes <code>data/training/ds_001/</code> with <code>images/</code>, <code>labels/</code>, and <code>data.yaml</code>. Before building, run <a href="#tab-insights">Insights → Dataset Health</a> to catch class imbalance.</p>
+        <div class="steptip"><b>Tip:</b> A bigger sample stride = smaller, faster dataset but fewer examples. Start around "every 5 frames" and adjust based on dataset health.</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">E</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Training tab → Train + promote prompt</span>
+        <h4>Train model #1 — fine-tune and promote</h4>
+        <p>Pick a base model and epochs, then start training. The app trains <strong>in-process via the Ultralytics API</strong> and streams progress live. When it finishes, the best weights are copied into <code>models/</code> as a timestamped <code>.pt</code> — accept the <strong>promote prompt</strong> to make it the active model so the Preprocessing/Batch/Live pickers use it.</p>
+        <div class="steptip"><b>Tip:</b> 30 epochs on <code>yolov8n</code> is a fast first loop. Scale up base model and epochs once you have more data and know the pipeline works.</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">F</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Performance (Ctrl+3) · Insights (Ctrl+9) · Models (Ctrl+7)</span>
+        <h4>Evaluate — prove the new model is actually better</h4>
+        <p>Use <strong>Insights → Confusion Matrix</strong> and <strong>Dataset Health</strong> to read class-level accuracy and balance. In <strong>Models → A/B compare</strong>, pit your new model against the stock <code>yolov8n</code> on a <em>dataset val split</em> (held-out frames) so the comparison is honest. Use <strong>Performance → Before/After</strong> to eyeball the difference on a real clip.</p>
+        <div class="steptip"><b>Tip:</b> Always compare on a val split, never on training frames — that's the difference between "memorized" and "learned".</div>
+      </div>
+    </div>
+
+    <div class="flow-stage">
+      <div class="flow-rail"><div class="flow-dot">G</div><div class="flow-line"></div></div>
+      <div class="flow-body">
+        <span class="where">Back to Batch with the promoted model → repeat C–F</span>
+        <h4>Repeat — turn the flywheel</h4>
+        <p>Point the better model at the <strong>next batch</strong> of unread videos (Batch tab, with the promoted model selected). Correct the next ~100 sessions — now <em>faster</em>, because the model is better and fewer boxes need fixing. Run <strong>Unused since last build</strong> again: it creates <code>ds_002</code> from <em>only</em> the sessions corrected since the last train. Optionally <strong>Combine existing datasets</strong> to fold ds_001 + ds_002 together, then train model #2. And so on.</p>
+        <div class="flow-loop">↺ Each iteration: new dataset · smarter model · less correction effort</div>
+      </div>
+    </div>
+
+  </div>
+
+  <h3>Why this loop is the whole point</h3>
+  <ul>
+    <li><strong>Each iteration creates a new, named dataset</strong> (<code>ds_001</code>, <code>ds_002</code>, …) — your work is versioned and auditable, never overwritten.</li>
+    <li><strong>"Unused since last build" prevents re-work</strong> — you only ever feed new corrections into the next round, and the app tracks this for you.</li>
+    <li><strong>Correction effort drops every loop</strong> — a model trained on your cameras makes fewer mistakes on your cameras, so review gets faster and faster.</li>
+    <li><strong>You can stop any time</strong> — when the A/B comparison shows the model is good enough for your accuracy target, you have both a trained model and a corrected ground-truth corpus to export in any of the 10 formats.</li>
+  </ul>
+
+  <div class="callout note">
+    <span class="clabel">Printable cheat-line</span>
+    <p><strong>Ingest → Batch-detect → Correct ~100 (Needs Review) → Build "Unused since last build" (ds_N) → Train + promote → A/B on val split → point new model at next batch → repeat.</strong></p>
+  </div>
+</section>
+
+<hr class="divider">
+<p class="muted" style="font-size:13px;text-align:center;">CCTV-YOLO v2.1.0 · YOLOv8 + ByteTrack · Native PySide6/Qt desktop application. This guide documents the application as built; every feature described maps to a real module in <code>software2/cctv_yolo/</code>.</p>
+
+</main>
+
+<button id="backtotop" aria-label="Back to top">↑</button>
+
+<script>
+/* ---------- mobile sidebar toggle ---------- */
+const sidebar = document.getElementById('sidebar');
+document.getElementById('menuToggle').addEventListener('click', () => sidebar.classList.toggle('open'));
+sidebar.addEventListener('click', e => { if (e.target.tagName === 'A' && window.innerWidth <= 980) sidebar.classList.remove('open'); });
+
+/* ---------- nav search / filter ---------- */
+const search = document.getElementById('nav-search');
+const navLinks = Array.from(sidebar.querySelectorAll('a'));
+const navHeads = Array.from(sidebar.querySelectorAll('h4'));
+search.addEventListener('input', () => {
+  const q = search.value.trim().toLowerCase();
+  navLinks.forEach(a => {
+    const match = !q || a.textContent.toLowerCase().includes(q);
+    a.classList.toggle('hidden-by-search', !match);
+  });
+  // hide a heading if all links after it (until next heading) are hidden
+  navHeads.forEach(h => {
+    let el = h.nextElementSibling, anyVisible = false;
+    while (el && el.tagName === 'A') { if (!el.classList.contains('hidden-by-search')) anyVisible = true; el = el.nextElementSibling; }
+    h.style.display = anyVisible ? '' : 'none';
+  });
+});
+
+/* ---------- scrollspy ---------- */
+const sections = Array.from(document.querySelectorAll('main section'));
+const linkFor = id => navLinks.find(a => a.getAttribute('href') === '#' + id);
+const spy = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navLinks.forEach(a => a.classList.remove('active'));
+      const l = linkFor(e.target.id);
+      if (l) l.classList.add('active');
+    }
+  });
+}, { rootMargin: '-25% 0px -65% 0px', threshold: 0 });
+sections.forEach(s => spy.observe(s));
+
+/* ---------- section entrance fade ---------- */
+sections.forEach(s => s.classList.add('fade'));
+const fade = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('shown'); fade.unobserve(e.target); } });
+}, { rootMargin: '0px 0px -8% 0px', threshold: 0.04 });
+sections.forEach(s => fade.observe(s));
+
+/* ---------- back to top ---------- */
+const btt = document.getElementById('backtotop');
+window.addEventListener('scroll', () => btt.classList.toggle('show', window.scrollY > 600));
+btt.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

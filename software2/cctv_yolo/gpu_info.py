@@ -23,6 +23,58 @@ class DeviceInfo:
     reason: str             # explanation when device == "cpu"; "" otherwise
 
 
+def _cuda_capability_and_arches():
+    """Return (capability tuple, compiled sm_* arch list, device name).
+
+    Any element may be None/empty if torch can't report it. Never raises.
+    """
+    try:
+        import torch
+    except Exception:
+        return None, [], None
+    try:
+        cap = torch.cuda.get_device_capability(0)
+    except Exception:
+        cap = None
+    try:
+        name = torch.cuda.get_device_name(0)
+    except Exception:
+        name = None
+    try:
+        arches = [a for a in torch.cuda.get_arch_list() if a.startswith("sm_")]
+    except Exception:
+        arches = []
+    return cap, arches, name
+
+
+def _arch_supported(cap, arch_list) -> bool:
+    """True if the GPU's compute capability is covered by the bundled wheel.
+
+    Classic failure: an RTX 50-series (Blackwell, sm_120 / major 12) GPU with
+    a cu118/cu121 wheel whose newest kernel is sm_90 (major 9). torch reports
+    cuda.is_available()==True (the driver is new enough) but the first kernel
+    launch dies with "no kernel image is available for execution on the
+    device". NVIDIA GPUs JIT forward *within* a major version, so the GPU is
+    usable only if the wheel compiled at least one arch whose major >= the
+    GPU's major. If the newest compiled major is older than the GPU's, it
+    cannot run. Conservative: unknowns return True so we never false-alarm.
+    """
+    try:
+        major, _minor = cap
+    except Exception:
+        return True
+    majors = []
+    for a in arch_list:
+        try:
+            n = int(a.split("_", 1)[1].rstrip("a+"))  # 'sm_90a' -> 90
+            majors.append(n // 10)
+        except Exception:
+            continue
+    if not majors:
+        return True
+    return major <= max(majors)
+
+
 def detect_device() -> DeviceInfo:
     """Pick the best device and explain *why* if CPU was the only option.
 
@@ -41,9 +93,23 @@ def detect_device() -> DeviceInfo:
         cuda_ok = False
 
     if cuda_ok:
-        try:
-            name = torch.cuda.get_device_name(0)
-        except Exception:
+        # cuda.is_available() can be True yet the bundled wheel still lack
+        # kernels for this GPU's architecture (RTX 50-series / Blackwell +
+        # cu118). Catch that here instead of returning a green "GPU active"
+        # that crashes on the first inference.
+        cap, arches, name = _cuda_capability_and_arches()
+        if cap is not None and arches and not _arch_supported(cap, arches):
+            sm = f"sm_{cap[0]}{cap[1]}"
+            reason = (
+                f"Your GPU ({name or 'NVIDIA GPU'}, compute {sm}) is newer "
+                f"than the bundled PyTorch CUDA build (CUDA "
+                f"{torch_cuda_build or '?'}; kernels: {', '.join(arches)}). "
+                "RTX 50-series (Blackwell) needs CUDA 12.8 — rebuild with "
+                "CCTV_YOLO_TORCH_VARIANT=cu128 and re-run build_windows.bat. "
+                "Running on CPU for now to avoid a hard crash."
+            )
+            return DeviceInfo("cpu", "CPU", torch_cuda_build, reason)
+        if not name:
             name = "NVIDIA GPU"
         label = f"{name} (CUDA {torch_cuda_build or '?'})"
         return DeviceInfo("cuda:0", label, torch_cuda_build, "")
@@ -68,15 +134,14 @@ def detect_device() -> DeviceInfo:
     else:
         # CUDA-built torch but is_available() is False. Most common cause
         # on Windows: the NVIDIA driver is older than the wheel's bundled
-        # CUDA runtime. cu118 wheels need driver >= 452.39 (Windows);
-        # cu121 needs >= 528.33. Less common: no NVIDIA hardware at all.
+        # CUDA runtime. Less common: no NVIDIA hardware at all.
         reason = (
             f"PyTorch was built for CUDA {torch_cuda_build} but no usable "
-            "NVIDIA GPU is visible. Update your NVIDIA driver (the "
-            "bundled CUDA runtime needs a recent driver), or rebuild "
-            "with a CUDA variant matching your driver "
-            "(set CCTV_YOLO_TORCH_VARIANT=cu118 for the broadest "
-            "compatibility, then re-run build_windows.bat)."
+            "NVIDIA GPU is visible. Update your NVIDIA driver, or rebuild "
+            "with a CUDA variant matching your GPU and driver: newest GPUs "
+            "(RTX 50-series / Blackwell) need CCTV_YOLO_TORCH_VARIANT=cu128; "
+            "RTX 30/40-series use cu121 or cu124; older cards use cu118. "
+            "Then re-run build_windows.bat."
         )
     return DeviceInfo("cpu", "CPU", torch_cuda_build, reason)
 

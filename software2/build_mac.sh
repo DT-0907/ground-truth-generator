@@ -155,6 +155,25 @@ echo ""
 echo "[3.5/5] Stripping extended attributes from the .app..."
 xattr -cr "dist/CCTV-YOLO.app" 2>/dev/null || true
 
+# Ad-hoc code-sign the whole bundle. Stripping xattrs alone does NOT stop the
+# "CCTV-YOLO is damaged and can't be opened" error on OTHER Macs — that comes
+# from an unsigned/invalid signature plus the quarantine flag the recipient's
+# browser adds on download. A valid (even ad-hoc, "-") deep signature
+# downgrades that hard block to the normal "unidentified developer →
+# right-click Open" prompt, and is REQUIRED on Apple Silicon (every binary
+# must carry at least an ad-hoc signature). This is NOT notarization: proper
+# distribution still needs a Developer ID + `xcrun notarytool` + stapling
+# (see the README), but ad-hoc signing is the best we can do without a paid
+# Apple Developer account and makes the app launchable via right-click → Open.
+echo "[3.6/5] Ad-hoc code-signing the .app..."
+if command -v codesign >/dev/null 2>&1; then
+    codesign --force --deep --sign - "dist/CCTV-YOLO.app" 2>/dev/null \
+        && echo "  Signed (ad-hoc)." \
+        || echo "  WARNING: ad-hoc codesign failed; first launch may need right-click > Open."
+else
+    echo "  (codesign not found — skipping; first launch may need right-click > Open.)"
+fi
+
 # ---- 4. DMG packaging -------------------------------------------------
 BUILD_STATUS="dmg"
 echo ""
@@ -162,13 +181,19 @@ echo "[4/5] Creating DMG..."
 
 # Free disk check — hdiutil silently fails when /tmp or dist/ can't hold
 # the staged .app + the compressed image.
-APP_SIZE_KB=$(du -sk "dist/CCTV-YOLO.app" | awk '{print $1}')
-NEEDED_KB=$(( APP_SIZE_KB * 3 ))  # staging + dmg + slack
-FREE_KB=$(df -k . | awk 'NR==2 {print $4}')
-if [ "$FREE_KB" -lt "$NEEDED_KB" ]; then
-    echo "ERROR: only ${FREE_KB} KB free, need ~${NEEDED_KB} KB for DMG."
-    echo "  Free some disk space and re-run, or skip the DMG step."
-    exit 1
+# `|| true` keeps a failed du/df pipe from aborting the build under
+# `set -e -o pipefail` right before the DMG step — the preflight is advisory.
+APP_SIZE_KB=$(du -sk "dist/CCTV-YOLO.app" 2>/dev/null | awk '{print $1}' || true)
+FREE_KB=$(df -k . 2>/dev/null | awk 'NR==2 {print $4}' || true)
+if [ -n "$APP_SIZE_KB" ] && [ -n "$FREE_KB" ]; then
+    NEEDED_KB=$(( APP_SIZE_KB * 3 ))  # staging + dmg + slack
+    if [ "$FREE_KB" -lt "$NEEDED_KB" ]; then
+        echo "ERROR: only ${FREE_KB} KB free, need ~${NEEDED_KB} KB for DMG."
+        echo "  Free some disk space and re-run, or skip the DMG step."
+        exit 1
+    fi
+else
+    echo "  (skipping disk-space preflight — du/df unavailable)"
 fi
 
 DMG_DIR="dist/dmg_staging"

@@ -140,7 +140,10 @@ if sys.platform == 'darwin':
             'CFBundleVersion': APP_VERSION,
             'CFBundleShortVersionString': APP_VERSION,
             'NSHighResolutionCapable': True,
-            'LSMinimumSystemVersion': '10.15',
+            # Match the real floor of the bundled PySide6 6.5+/torch wheels
+            # (and the README's stated "macOS 12+"). The old 10.15 made Launch
+            # Services try to run on Catalina, then dyld-crash mid-import.
+            'LSMinimumSystemVersion': '12.0',
         },
     )
 else:

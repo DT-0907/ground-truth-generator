@@ -20,7 +20,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import threading
 from collections import defaultdict
@@ -320,16 +319,14 @@ class TrainingWorker(QThread):
         self.batch = batch
         self.run_name = run_name or dt.datetime.now().strftime("run_%Y%m%d_%H%M%S")
         self.models_dir = Path(models_dir) if models_dir else None
-        self._proc: Optional[subprocess.Popen] = None
         self._stop = False
 
     def stop(self):
+        # Training now runs IN-PROCESS via the Ultralytics API (see run()).
+        # An epoch-end callback watches self._stop and sets
+        # trainer.stop_training, so training halts cleanly at the next epoch
+        # boundary. There is no subprocess to terminate.
         self._stop = True
-        if self._proc and self._proc.poll() is None:
-            try:
-                self._proc.terminate()
-            except Exception:
-                pass
 
     def _collect_meta(self, src: Path, dest: Path, stamp: str) -> dict:
         """Assemble provenance metadata for the trained model.
@@ -378,61 +375,143 @@ class TrainingWorker(QThread):
 
     def run(self):
         try:
-            cmd = [
-                sys.executable, "-m", "ultralytics",
-                "detect", "train",
-                f"data={self.data_yaml}",
-                f"model={self.base_model}",
-                f"epochs={self.epochs}",
-                f"imgsz={self.imgsz}",
-                f"batch={self.batch}",
-                f"name={self.run_name}",
-                f"project={Path(self.data_yaml).parent / 'runs'}",
-                "verbose=True",
-                "exist_ok=True",
-            ]
-            self.log_line.emit("$ " + " ".join(cmd))
-            # CREATE_NO_WINDOW: stops `yolo` from flashing a console window
-            # in the windowed (console=False) build. No-op off Windows.
-            self._proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            project = str(Path(self.data_yaml).parent / "runs")
+            self.log_line.emit(
+                "$ (in-process) ultralytics detect train "
+                f"data={self.data_yaml} model={self.base_model} "
+                f"epochs={self.epochs} imgsz={self.imgsz} "
+                f"batch={self.batch} name={self.run_name}"
             )
 
-            epoch_re = re.compile(r"^\s*(\d+)/(\d+)\b")
-            best_path = None
-            for line in self._proc.stdout:
-                if self._stop:
-                    break
-                line = line.rstrip()
-                if not line:
-                    continue
-                self.log_line.emit(line)
+            # Run Ultralytics IN-PROCESS — NOT via `sys.executable -m
+            # ultralytics`. In a PyInstaller-frozen app sys.executable is the
+            # GUI exe itself, so the old subprocess just relaunched the app
+            # instead of training (training was dead in every shipped build).
+            # ultralytics is a bundled hidden import (see cctv_yolo.spec) and
+            # imports cleanly here — processor.py already uses it in-process.
+            from ultralytics import YOLO
 
-                m = epoch_re.match(line)
-                if m:
-                    cur, tot = int(m.group(1)), int(m.group(2))
+            # Use the same device the rest of the app uses (cuda/mps/cpu).
+            try:
+                from cctv_yolo.gpu_info import detect_device
+                dev = detect_device().device
+                if dev.startswith("cuda"):
+                    train_device = 0
+                elif dev == "mps":
+                    train_device = "mps"
+                else:
+                    train_device = "cpu"
+            except Exception:
+                train_device = "cpu"
+
+            # In the frozen build, torch DataLoader worker processes would
+            # re-spawn the GUI exe (multiprocessing spawn → sys.executable).
+            # workers=0 keeps data loading on this thread: slower but correct.
+            # Dev runs (run.py) keep the Ultralytics default for speed.
+            workers = 0 if getattr(sys, "frozen", False) else 8
+
+            model = YOLO(self.base_model)
+
+            def _on_epoch_end(trainer):
+                try:
+                    cur = int(getattr(trainer, "epoch", 0)) + 1
+                    tot = int(getattr(trainer, "epochs", 0)) or self.epochs
                     if tot > 0:
-                        self.progress.emit(int(cur / tot * 100))
+                        self.progress.emit(min(int(cur / tot * 100), 100))
+                except Exception:
+                    pass
+                if self._stop:
+                    # Ultralytics breaks the training loop when trainer.stop
+                    # is set (checked at batch/epoch boundaries in
+                    # engine/trainer.py). NOTE: the flag is `stop` — NOT
+                    # `stop_training`, which this version ignores.
+                    try:
+                        trainer.stop = True
+                    except Exception:
+                        pass
 
-                # Catch the "best.pt" path from the summary
-                if "best.pt" in line:
-                    for tok in line.split():
-                        if tok.endswith("best.pt"):
-                            best_path = tok
-                            break
+            for _ev in ("on_fit_epoch_end", "on_train_epoch_end"):
+                try:
+                    model.add_callback(_ev, _on_epoch_end)
+                except Exception:
+                    pass
 
-            self._proc.wait()
-            if self._proc.returncode != 0 and not self._stop:
-                self.failed.emit(f"yolo train exited with code {self._proc.returncode}")
+            # In the windowed (console=False) build, sys.stdout/stderr are
+            # None, so Ultralytics' prints and tqdm bars would raise. Redirect
+            # both to a sink that also forwards completed lines to the UI log.
+            import contextlib
+            import io
+
+            class _EmitWriter(io.TextIOBase):
+                def __init__(self, emit):
+                    self._emit = emit
+                    self._buf = ""
+
+                def write(self, s):
+                    try:
+                        self._buf += s
+                        while "\n" in self._buf:
+                            line, self._buf = self._buf.split("\n", 1)
+                            line = line.rstrip()
+                            if line:
+                                self._emit(line)
+                    except Exception:
+                        pass
+                    return len(s)
+
+                def flush(self):
+                    pass
+
+            writer = _EmitWriter(self.log_line.emit)
+
+            # Ultralytics' LOGGER StreamHandler is bound to sys.stdout at
+            # import time, so redirect_stdout below won't capture its output
+            # (the epoch table, mAP lines, "Results saved to..."). Attach a
+            # handler that forwards LOGGER records to the UI log too.
+            import logging as _logging
+            _ul_logger = _logging.getLogger("ultralytics")
+            _ul_handler = _logging.StreamHandler(writer)
+            _ul_handler.setFormatter(_logging.Formatter("%(message)s"))
+            _ul_logger.addHandler(_ul_handler)
+            try:
+                with contextlib.redirect_stdout(writer), \
+                        contextlib.redirect_stderr(writer):
+                    model.train(
+                        data=self.data_yaml,
+                        epochs=self.epochs,
+                        imgsz=self.imgsz,
+                        batch=self.batch,
+                        name=self.run_name,
+                        project=project,
+                        device=train_device,
+                        workers=workers,
+                        verbose=True,
+                        exist_ok=True,
+                    )
+            except Exception as e:
+                if self._stop:
+                    self.failed.emit("Training stopped by user")
+                    return
+                _logging.getLogger(__name__).exception("In-process training failed")
+                self.failed.emit(f"Training failed: {e}")
                 return
+            finally:
+                _ul_logger.removeHandler(_ul_handler)
+
             if self._stop:
                 self.failed.emit("Training stopped by user")
                 return
+
+            # Prefer the trainer's own save_dir to locate best.pt.
+            best_path = None
+            try:
+                _sd = getattr(getattr(model, "trainer", None), "save_dir", None)
+                if _sd:
+                    _cand = Path(_sd) / "weights" / "best.pt"
+                    if _cand.exists():
+                        best_path = str(_cand)
+            except Exception:
+                pass
 
             # Find best.pt in the runs/<name>/weights dir
             runs_dir = Path(self.data_yaml).parent / "runs" / self.run_name / "weights"

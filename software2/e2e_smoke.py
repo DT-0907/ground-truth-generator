@@ -290,9 +290,15 @@ def main() -> int:
     # (regression: on Windows, default cp1252 bombs on UTF-8 JSON)
     import re
     bad_open: list[str] = []
+    # builtin form:  open(path, "w")        -- mode is the 2nd arg
     open_pat = re.compile(
         r'open\([^)]*?,\s*["\']([rwa]\+?)["\'](?!\s*,\s*encoding)',
     )
+    # Path.open form:  path.open("w", ...)  -- mode is the 1st arg. The
+    # builtin pattern misses this (no path arg before the mode), which is
+    # exactly how exports/csv_writer.py once slipped through. Binary modes
+    # ("rb"/"wb") are excluded since 'b' breaks the [rwa] char class.
+    open_method_pat = re.compile(r'\.open\(\s*["\']([rwa]\+?)["\']')
     for py in Path("cctv_yolo").rglob("*.py"):
         if "__pycache__" in str(py):
             continue
@@ -300,7 +306,7 @@ def main() -> int:
         for i, line in enumerate(text.splitlines(), 1):
             if "encoding=" in line:
                 continue
-            if open_pat.search(line):
+            if open_pat.search(line) or open_method_pat.search(line):
                 bad_open.append(f"{py}:{i}")
     check("Every text-mode open() specifies encoding=",
           not bad_open,

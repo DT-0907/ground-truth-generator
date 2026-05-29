@@ -90,7 +90,8 @@ def _atomic_write_json(path: Path, data: dict, *, indent: int = 2, backup: bool 
                 last_err = e
                 if sys.platform != "win32":
                     raise
-                time.sleep(0.05 * (2 ** attempt))
+                if attempt < 5:  # don't sleep after the final attempt
+                    time.sleep(0.05 * (2 ** attempt))
         if last_err is not None:
             logger.error(
                 "Atomic rename failed after retries: %s -> %s (%s). "

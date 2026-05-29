@@ -29,6 +29,20 @@ class BatchCancelled(Exception):
     pass
 
 
+_KERNEL_IMAGE_MSG = (
+    "Your GPU is newer than this build's bundled CUDA runtime, so there are "
+    "no compatible compute kernels. Rebuild with a matching CUDA variant — "
+    "RTX 50-series (Blackwell) needs CCTV_YOLO_TORCH_VARIANT=cu128 — then "
+    "re-run build_windows.bat. (You can also run on CPU in the meantime.)"
+)
+
+
+def _is_kernel_image_error(msg: str) -> bool:
+    """True for the CUDA 'no kernel image is available' error (GPU arch newer
+    than the bundled torch wheel). ``msg`` should already be lower-cased."""
+    return "no kernel image" in msg or "kernel image is available" in msg
+
+
 def _get_device():
     """Detect the best available device: CUDA GPU, Apple MPS, or CPU.
 
@@ -228,6 +242,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
                 "Out of memory. Try a smaller model (e.g. yolov8n) or "
                 "reduce video resolution."
             ) from e
+        if _is_kernel_image_error(msg):
+            logger.exception("CUDA kernel-image mismatch starting tracker")
+            raise ProcessingError(_KERNEL_IMAGE_MSG) from e
         logger.exception("Tracker start failed")
         raise
 
@@ -331,6 +348,9 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
             raise ProcessingError(
                 "Couldn't read this video. Try re-encoding to H.264 MP4."
             ) from e
+        if _is_kernel_image_error(msg):
+            logger.exception("CUDA kernel-image mismatch during inference")
+            raise ProcessingError(_KERNEL_IMAGE_MSG) from e
         logger.exception("Unhandled runtime error during inference")
         raise
     except cv2.error as e:

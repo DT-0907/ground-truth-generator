@@ -24,11 +24,18 @@ VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 1: "bicycle"
 
 
 def _device():
-    if torch.cuda.is_available():
-        return "cuda:0"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+    # Delegate to the centralized detector so Model Compare honors the same
+    # device choice as the rest of the app — including the Blackwell-vs-cu118
+    # arch check that falls back to CPU instead of crashing.
+    try:
+        from cctv_yolo.gpu_info import detect_device
+        return detect_device().device
+    except Exception:
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
 
 
 def _bbox_center_in_roi(bbox, roi: Optional[dict]) -> bool:
@@ -80,7 +87,8 @@ def run_model_track(
 
     local = Path(models_dir) / model_path
     model = YOLO(str(local) if local.exists() else model_path)
-    model.to(_device())
+    dev = _device()
+    model.to(dev)
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -94,6 +102,7 @@ def run_model_track(
         classes=list(VEHICLE_CLASSES.keys()),
         tracker="bytetrack.yaml",
         stream=True,
+        device=dev,
         verbose=False,
         vid_stride=stride,
     )
@@ -317,7 +326,8 @@ def run_model_on_val_split(
 
     local = Path(models_dir) / model_path
     model = YOLO(str(local) if local.exists() else model_path)
-    model.to(_device())
+    dev = _device()
+    model.to(dev)
 
     images = sorted(val_images.glob("*.jpg")) + sorted(val_images.glob("*.png"))
     total = max(1, len(images))
@@ -335,7 +345,7 @@ def run_model_on_val_split(
         lbl = val_labels / (img_path.stem + ".txt")
         gt_list: list[dict] = []
         if lbl.exists():
-            for line in lbl.read_text().splitlines():
+            for line in lbl.read_text(encoding="utf-8").splitlines():
                 parts = line.split()
                 if len(parts) < 5:
                     continue
@@ -349,7 +359,7 @@ def run_model_on_val_split(
                 gt_list.append({"class": name, "bbox": [x1, y1, x2, y2]})
 
         # Predictions
-        results = model.predict(source=img, conf=conf, verbose=False)
+        results = model.predict(source=img, conf=conf, device=dev, verbose=False)
         pred_list: list[dict] = []
         if results and len(results) > 0:
             r0 = results[0]

@@ -35,7 +35,7 @@ def write_per_track_csv(
         roi_id,
     )
 
-    with output_path.open("w", newline="") as f:
+    with output_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow([
             "track_id", "class", "start_frame", "end_frame",
@@ -76,7 +76,7 @@ def write_per_frame_csv(
     header = ["frame", "track_id", "class", "x1", "y1", "x2", "y2", "conf"]
     header.extend(col for _, col in roi_cols)
 
-    with output_path.open("w", newline="") as f:
+    with output_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(header)
         rows: list[list] = []

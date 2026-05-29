@@ -136,7 +136,6 @@ class ModelDownloadWorker(QThread):
     # Per-file network timeout (seconds). HTTP keep-alive will reset within
     # this window if the server stalls.
     READ_TIMEOUT = 30
-    CONNECT_TIMEOUT = 15
     MAX_ATTEMPTS_PER_URL = 3
     CHUNK_SIZE = 64 * 1024
 
@@ -212,9 +211,14 @@ class ModelDownloadWorker(QThread):
             },
         )
 
-        socket.setdefaulttimeout(self.CONNECT_TIMEOUT)
+        # NOTE: do NOT use socket.setdefaulttimeout() here — it is a global,
+        # process-wide setting that would leak into every other socket in the
+        # app (Qt network, future urllib calls) and was never restored. The
+        # per-call timeout below governs both connect and reads on this
+        # socket (urllib applies one timeout to the whole connection), so we
+        # use READ_TIMEOUT, the larger of the two, to allow slow transfers.
         try:
-            with urllib.request.urlopen(req, timeout=self.CONNECT_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=self.READ_TIMEOUT) as resp:
                 # Determine total size (for progress bar). Includes already-
                 # downloaded bytes when Range was used.
                 content_len = resp.headers.get("Content-Length")

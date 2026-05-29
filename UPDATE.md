@@ -5,6 +5,103 @@ the union of both. Older features from wave 1 are preserved in wave 2.
 
 ---
 
+# Wave 3 — Cross-platform build & runtime hardening (2026-05-28)
+
+This wave is not about new features — it's about making the v2 desktop
+app **actually build and run** on the machines testers have, across
+Windows and macOS. A multi-agent cross-platform audit surfaced a stack
+of blockers (the Windows build could hang forever; Training was dead in
+every shipped binary; newest-generation GPUs ran on CPU or crashed) plus
+a tail of reliability bugs. This is the authoritative list of what
+shipped this round.
+
+## Windows build now actually builds (the blocker)
+
+- **Root cause of a tester's "build hangs forever / KeyboardInterrupt
+  during pip install torch":** their `python` was Python 3.14, and
+  PyTorch ships **no wheels for 3.13/3.14**, so pip's resolver thrashed
+  indefinitely trying to find a satisfiable version. The script also
+  blindly reused a venv that had been created with 3.14.
+- `build_windows.bat` now:
+  - **(a)** selects a supported interpreter, preferring the
+    `py -3.12` / `py -3.11` / `py -3.10` launcher, and refuses to
+    proceed on 3.13/3.14 with a clear message + a python.org download
+    link.
+  - **(b)** revalidates a **reused** venv's Python version and
+    auto-recreates it if the version is unsupported.
+  - **(c)** fixes the step numbering (`[4/4]` → `[4/5]`) and adds a
+    torch-install verification that warns loudly if a CPU-only wheel
+    was silently resolved when CUDA was requested.
+
+## GPU / CUDA: Blackwell (RTX 50-series) support
+
+- New **`detect_torch_variant.py`** auto-detects the GPU/driver via
+  `nvidia-smi` and picks the right torch wheel index: **cu128**
+  (Blackwell / driver CUDA ≥ 12.8), cu126, cu124, cu121, cu118, or
+  cpu. The old fixed `cu118` default could not drive Blackwell GPUs
+  (compute `sm_120`) — they ran on CPU or crashed with "no kernel
+  image is available for execution on the device". A tester's
+  **RTX 5070 on CUDA 13.0** now resolves to cu128.
+- `gpu_info.detect_device()` now validates the GPU's compute
+  capability against the bundled wheel's compiled kernels: an
+  RTX 50-series GPU with a cu118 wheel is reported as
+  **CPU-with-a-fixable-reason** instead of a green "GPU active" that
+  crashes on first inference. CPU-fallback guidance is now
+  GPU-generation-aware (it recommends cu128 for the newest GPUs).
+- `processor.py` now turns the cryptic CUDA "no kernel image is
+  available" error into an actionable message ("rebuild with cu128").
+- `model_compare.py` now passes `device=` on track/predict and routes
+  through the centralized detector, so **Model Compare uses the GPU**
+  (and the same Blackwell-safety check) instead of silently running on
+  CPU.
+
+## Training works in the shipped build (was completely broken)
+
+- The Training tab spawned `sys.executable -m ultralytics`. In a
+  PyInstaller-frozen app `sys.executable` is the **GUI exe itself**, so
+  this relaunched the app instead of training — the entire
+  active-learning loop was **dead in every shipped .exe/.dmg** (it only
+  ever worked in dev). Training now runs **in-process** via the
+  Ultralytics Python API on the worker thread, with:
+  - epoch-callback progress reporting,
+  - a clean cooperative stop,
+  - stdout/stderr redirected (the windowed build has no console),
+  - DataLoader workers disabled in frozen builds (they would otherwise
+    re-spawn the GUI).
+
+## macOS distribution
+
+- `build_mac.sh` now **ad-hoc code-signs** the `.app`
+  (`codesign --deep --sign -`) so it isn't blocked as "damaged and
+  can't be opened" on other Macs — it downgrades the experience to the
+  normal right-click → **Open** prompt. (Full notarization still
+  requires a paid Apple Developer ID; noted as the proper path.)
+- Hardened the `du`/`df` disk-space preflight against `set -e`.
+- Bumped the bundle's `LSMinimumSystemVersion` to **12.0** to match the
+  real PySide6/torch floor (and the README).
+
+## Reliability fixes
+
+- **Live tab:** the stream worker (QThread + VideoCapture/VideoWriter)
+  is now stopped and joined on app close and before restart, instead of
+  being orphaned.
+- **Performance tab:** the confusion-matrix computation now runs on a
+  worker thread instead of freezing the GUI on long sessions.
+- **NAS:** config read now forces UTF-8; Windows unmount uses the bare
+  drive (`"Z:"`) instead of `"Z:\"` so `net use /delete` actually
+  works.
+- **Model downloader** no longer sets a process-wide socket timeout
+  (which leaked into every other socket and was never restored); reads
+  now honor the intended 30 s timeout.
+- **CSV export** writers now force UTF-8 (non-ASCII ROI/class names no
+  longer abort export on Windows), and the end-to-end smoke test's
+  `open()`-encoding sweep was strengthened to also catch the
+  `Path.open("w")` form that previously slipped through.
+
+Found via a 34-finding multi-agent cross-platform audit; the remaining low-severity and sample-rate-specific findings are tracked for a follow-up.
+
+---
+
 # Wave 2 — Active-learning loop, occlusion handling, anomalies, clips, CLI (2026-05-01)
 
 This wave focuses on the **occlusion / re-identification edge case** the

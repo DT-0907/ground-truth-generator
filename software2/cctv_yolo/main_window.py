@@ -548,4 +548,10 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Stop any live stream worker (QThread + VideoCapture/VideoWriter).
+        try:
+            self.live_tab.shutdown()
+        except Exception:
+            pass
+
         event.accept()

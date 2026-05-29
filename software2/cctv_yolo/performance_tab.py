@@ -21,12 +21,11 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QThread, Signal
 from PySide6.QtGui import QDesktopServices
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QComboBox,
     QDoubleSpinBox,
@@ -295,6 +294,33 @@ def _save_ui_state(data_manager, state: dict) -> None:
 # Main tab
 # ---------------------------------------------------------------------------
 
+class _ConfusionWorker(QThread):
+    """Compute the confusion matrix off the GUI thread.
+
+    compute_confusion_matrix() matches every raw track against every
+    correction across all frames, which froze the window on long sessions.
+    """
+
+    finished_ok = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, *, predictions, ground_truth, classes,
+                 iou_threshold, roi_filter, parent=None):
+        super().__init__(parent)
+        self._kw = dict(
+            predictions=predictions, ground_truth=ground_truth,
+            classes=classes, iou_threshold=iou_threshold, roi_filter=roi_filter,
+        )
+
+    def run(self):
+        try:
+            result = compute_confusion_matrix(**self._kw)
+        except Exception as e:  # noqa: BLE001 — surface any compute error to UI
+            self.failed.emit(str(e))
+            return
+        self.finished_ok.emit(result)
+
+
 class PerformanceTab(QWidget):
     """Performance tab — traffic counts and stats for processed sessions."""
 
@@ -312,6 +338,7 @@ class PerformanceTab(QWidget):
         # Workers (held to keep references alive)
         self._compare_worker: ModelCompareWorker | None = None
         self._beforeafter_worker: BeforeAfterWorker | None = None
+        self._confusion_worker: QThread | None = None
 
         self._build_ui()
         self._populate_sessions()
@@ -1921,23 +1948,34 @@ class PerformanceTab(QWidget):
         corr = self.dm.load_corrections(sid)
         roi = self.confusion_roi.currentData()
 
+        # Compute off the GUI thread so the window stays responsive on long
+        # sessions (matching every raw track to every correction is O(frames)).
+        if self._confusion_worker is not None and self._confusion_worker.isRunning():
+            return  # a compute is already in flight
         self.confusion_status.setText("Computing...")
-        QApplication.processEvents()
-        try:
-            classes = VEHICLE_ORDER
-            result = compute_confusion_matrix(
-                predictions=raw,
-                ground_truth=corr,
-                classes=classes,
-                iou_threshold=0.5,
-                roi_filter=roi,
-            )
-        except Exception as e:
-            self.confusion_status.setText("Failed.")
-            QMessageBox.critical(self, "Compute Failed", str(e))
-            return
+        self.btn_compute_confusion.setEnabled(False)
 
-        self._render_confusion(result)
+        worker = _ConfusionWorker(
+            predictions=raw,
+            ground_truth=corr,
+            classes=VEHICLE_ORDER,
+            iou_threshold=0.5,
+            roi_filter=roi,
+        )
+        self._confusion_worker = worker
+
+        def _on_done(result):
+            self.btn_compute_confusion.setEnabled(True)
+            self._render_confusion(result)
+
+        def _on_failed(msg):
+            self.btn_compute_confusion.setEnabled(True)
+            self.confusion_status.setText("Failed.")
+            QMessageBox.critical(self, "Compute Failed", msg)
+
+        worker.finished_ok.connect(_on_done)
+        worker.failed.connect(_on_failed)
+        worker.start()
 
     def _render_confusion(self, result: dict) -> None:
         axis = result.get("axis", [])

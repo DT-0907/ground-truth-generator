@@ -742,6 +742,11 @@ class LiveTab(QWidget):
             self._load_rois_for_source(source)
         self._save_ui_state({"live": {"last_source": source}})
 
+        # Don't orphan a worker that's still running (e.g. Start pressed again
+        # without Stop). Join the old one before spawning a new one.
+        if self._worker is not None:
+            self._teardown_worker()
+
         model_a = self.model_combo.currentText()
         model_b = self.model_combo_b.currentText() if self.radio_compare.isChecked() else None
 
@@ -782,6 +787,29 @@ class LiveTab(QWidget):
         if self._worker:
             self._worker.stop()
             self.status.setText("stopping…")
+
+    def _teardown_worker(self, timeout_ms: int = 5000):
+        """Cooperatively stop and JOIN the live worker (synchronous).
+
+        Used on restart and on app close so the QThread, its VideoCapture,
+        and any open VideoWriter don't outlive the tab/app.
+        """
+        w = self._worker
+        if w is None:
+            return
+        try:
+            w.stop()
+            if not w.wait(timeout_ms):
+                # Blocked in cap.read()/inference on a dead source — force it.
+                w.terminate()
+                w.wait()
+        except Exception:
+            pass
+        self._worker = None
+
+    def shutdown(self):
+        """Called from MainWindow.closeEvent so the app exits cleanly."""
+        self._teardown_worker()
 
     # ----------------------------------------------------------- frames ---
 
@@ -844,6 +872,9 @@ class LiveTab(QWidget):
         self.banner.setVisible(False)
         self._recording = False
         self.btn_record.setText("Start Recording")
+        # The worker's run() has returned; drop the reference so it isn't
+        # held (and re-Start spawns a fresh one cleanly).
+        self._worker = None
 
     def _on_reconnecting(self, msg: str):
         self.banner.setText(f"Reconnecting…  {msg}")

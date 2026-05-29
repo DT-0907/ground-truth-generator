@@ -32,9 +32,9 @@ class NasManager:
         if not self.config_file.exists():
             return None
         try:
-            with open(self.config_file) as f:
+            with open(self.config_file, encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return None
         try:
             data["password"] = base64.b64decode(data["password"]).decode()
@@ -130,8 +130,13 @@ class NasManager:
             return
         try:
             if sys.platform == "win32":
+                # `net use /delete` wants a bare device name ("Z:"), NOT the
+                # Path form with a trailing backslash ("Z:\") that mount()
+                # builds — the latter is rejected and the unmount silently
+                # fails, leaking the mapped drive.
+                drive = str(mount_point).rstrip("\\/")
                 subprocess.run(
-                    ["net", "use", str(mount_point), "/delete", "/y"],
+                    ["net", "use", drive, "/delete", "/y"],
                     capture_output=True,
                     timeout=10,
                     creationflags=_NO_WINDOW,

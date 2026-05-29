@@ -108,9 +108,16 @@ cd software2 && ./build_mac.sh
 cd software2 && build_windows.bat
 ```
 
-The Windows script now auto-detects Python compatibility and falls back from
-CUDA to CPU torch wheels automatically if no GPU wheel exists for your Python
-version. Recommended Python: 3.10, 3.11, or 3.12.
+The macOS `.app` is ad-hoc signed (not notarized), so on another Mac the
+first launch may need right-click → **Open**.
+
+The Windows script requires Python 3.10–3.12: it refuses 3.13/3.14 (which
+have no PyTorch wheels and make pip's resolver hang) and auto-recreates a
+`build_venv` that was built with an unsupported version. It prefers the
+`py -3.12` launcher. It auto-detects your GPU via `nvidia-smi` and picks the
+matching torch wheel — cu128 for RTX 50-series/Blackwell, down through cu126 /
+cu124 / cu121 / cu118 for older cards, or cpu if no CUDA GPU is found. Set
+`CCTV_YOLO_TORCH_VARIANT` to override the auto-pick.
 
 If `CCTV-YOLO.exe` won't open after building, run `CCTV-YOLO-debug.bat`
 (shipped next to the exe) — it captures the real startup error to
