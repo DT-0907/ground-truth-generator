@@ -23,6 +23,27 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+# Suppress stray console windows. The production exe is windowed (no console of
+# its own), but library code we call (ultralytics, and any tool that shells out)
+# can spawn console subprocesses that flash a black terminal over the GUI — and
+# a lingering one can take the app down with it when closed. Patch Popen's
+# default creationflags to add CREATE_NO_WINDOW so no child ever allocates a
+# console. This is a no-op for GUI children (e.g. explorer for "reveal in
+# folder"), so the OpenLocationBar still works. Must run before any subprocess.
+if sys.platform == "win32":
+    try:
+        import subprocess as _sp
+        _CREATE_NO_WINDOW = 0x08000000
+        _orig_popen_init = _sp.Popen.__init__
+
+        def _quiet_popen_init(self, *args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+            _orig_popen_init(self, *args, **kwargs)
+
+        _sp.Popen.__init__ = _quiet_popen_init
+    except Exception:
+        pass
+
 
 def _select_torch_dir():
     """Which directory should provide torch/torchvision (Windows frozen only).

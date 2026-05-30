@@ -21,6 +21,24 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+# Suppress stray console windows from child processes on Windows so no black
+# terminal flashes over the GUI (the frozen build does this in runtime_hook.py;
+# this covers dev runs: python run.py / -m cctv_yolo.main). CREATE_NO_WINDOW is
+# a no-op for GUI children (explorer reveal), so it only hides console flashes.
+if sys.platform == "win32":
+    try:
+        import subprocess as _sp
+        _CREATE_NO_WINDOW = 0x08000000
+        _orig_popen_init = _sp.Popen.__init__
+
+        def _quiet_popen_init(self, *a, **kw):
+            kw["creationflags"] = kw.get("creationflags", 0) | _CREATE_NO_WINDOW
+            _orig_popen_init(self, *a, **kw)
+
+        _sp.Popen.__init__ = _quiet_popen_init
+    except Exception:
+        pass
+
 # NOTE: PySide6 / cctv_yolo imports are deliberately NOT done at module scope.
 # In the frozen Windows exe an import-time failure (missing DLL, missing hidden
 # import) raised here would crash the process *before* the try/except in
