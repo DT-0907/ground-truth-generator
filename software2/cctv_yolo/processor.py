@@ -2,6 +2,21 @@
 Video processor: Detection + Tracking pipeline using Ultralytics.
 """
 
+import os
+
+# CRITICAL (Windows): detection/tracking runs on Qt WORKER threads — the batch
+# scheduler's QThreadPool and the single-video ProcessingWorker QThread. torch
+# and OpenCV each spin up their own OpenMP / Intel math thread pools; combined
+# with the duplicate-OpenMP shim (KMP_DUPLICATE_LIB_OK=TRUE that torch needs to
+# load at all), the SECOND inference run on a worker thread heap-corrupts the
+# whole process (exits with 0xC0000374 / STATUS_HEAP_CORRUPTION). Pinning the
+# native math libraries to a single thread stops the conflicting per-thread
+# OpenMP teams from being created. This must be set BEFORE torch is imported.
+# Batch throughput is preserved: parallel workers still use one core each
+# (N videos x 1 thread), so total CPU utilisation is unchanged.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import json
 import logging
 import time
@@ -13,6 +28,18 @@ from datetime import datetime
 from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
+
+# Belt-and-suspenders: cap the library thread pools at the API level too (the
+# env vars above govern OpenMP init; these cover torch's intra-op pool and
+# OpenCV's internal threads). See the comment above for why this is required.
+try:
+    torch.set_num_threads(1)
+except Exception:
+    pass
+try:
+    cv2.setNumThreads(0)
+except Exception:
+    pass
 
 
 class ProcessingError(RuntimeError):

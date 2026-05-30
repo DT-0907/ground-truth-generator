@@ -7,8 +7,33 @@ scheduler can run many concurrently in a ``QThreadPool``. A ``QThread``-based
 ``ProcessingWorker`` shim is kept for any single-shot legacy callers
 (processing one video on-demand from the Videos tab).
 """
+import os
+# Pin native math libraries to a single thread BEFORE torch is imported below.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import traceback
 from PySide6.QtCore import QObject, QRunnable, QThread, Signal
+
+# CRITICAL (Windows heap-corruption fix): detection runs on Qt WORKER threads
+# (this module's ProcessingRunnable on a QThreadPool, and ProcessingWorker as a
+# QThread). torch's OpenMP runtime MUST be initialised on the MAIN thread — if
+# its first import happens lazily inside run() on a transient worker thread, the
+# SECOND inference run heap-corrupts the process (exit 0xC0000374). This module
+# is imported by the batch scheduler (_launch) and the Preprocessing tab on the
+# GUI/main thread *before* any worker is dispatched, so importing + thread-
+# capping torch/OpenCV here pins them on the main thread. Batch throughput is
+# preserved: parallel workers still use one core each.
+try:
+    import torch
+    torch.set_num_threads(1)
+except Exception:
+    pass
+try:
+    import cv2
+    cv2.setNumThreads(0)
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------

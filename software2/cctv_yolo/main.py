@@ -13,6 +13,13 @@ from pathlib import Path
 # load libiomp5md.dll. Setting it here too (in addition to the runtime hook)
 # covers `python -m cctv_yolo.main` dev runs.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+# Pin native math libraries to a single thread BEFORE torch is imported.
+# Detection runs on Qt worker threads; with the duplicate-OpenMP shim above,
+# multi-threaded torch/OpenCV on a 2nd worker thread heap-corrupts the process
+# on Windows (0xC0000374). Must be set before the first torch import — which in
+# the GUI happens early via performance_tab -> model_compare. See processor.py.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 # NOTE: PySide6 / cctv_yolo imports are deliberately NOT done at module scope.
 # In the frozen Windows exe an import-time failure (missing DLL, missing hidden

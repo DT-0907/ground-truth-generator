@@ -107,17 +107,29 @@ def build_review_pack(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if output_zip is None:
-        output_zip = out_dir.parent / f"{session_id}_review_pack.zip"
+        # Short name: the file already lives in a per-session folder, and a
+        # path-aware batch session_id can be ~90 chars — repeating it here would
+        # risk Windows' 260-char MAX_PATH.
+        output_zip = out_dir.parent / "review_pack.zip"
     output_zip = Path(output_zip)
 
-    # Working files
+    # Working files. Keep the ON-DISK names SHORT: the session_id can be ~90
+    # chars for batch sessions (path-aware ids), and nesting it under
+    # exports/<sid>/review_pack/_build/<sid>_annotated.mp4 blows past Windows'
+    # 260-char MAX_PATH, so cv2.VideoWriter silently fails to open the output.
+    # The friendly "<sid>_*" names are applied only inside the zip (arcname).
     work_dir = out_dir / "_build"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    annotated_mp4 = work_dir / f"{session_id}_annotated.mp4"
-    csv_path = work_dir / f"{session_id}_per_track.csv"
-    pdf_path = work_dir / f"{session_id}_summary.pdf"
+    annotated_mp4 = work_dir / "annotated.mp4"
+    csv_path = work_dir / "per_track.csv"
+    pdf_path = work_dir / "summary.pdf"
     readme_path = work_dir / "README.md"
+
+    # Friendly names used only inside the archive.
+    arc_mp4 = f"{session_id}_annotated.mp4"
+    arc_csv = f"{session_id}_per_track.csv"
+    arc_pdf = f"{session_id}_summary.pdf"
 
     if progress_callback:
         progress_callback(5)
@@ -146,11 +158,11 @@ def build_review_pack(
         f"Generated: {datetime.now().isoformat(timespec='seconds')}",
         "",
         "## Contents",
-        f"- `{annotated_mp4.name}` — annotated MP4 (bboxes, labels, ROIs, HUD).",
-        f"- `{csv_path.name}` — per-track CSV (id, class, frame range, conf).",
+        f"- `{arc_mp4}` — annotated MP4 (bboxes, labels, ROIs, HUD).",
+        f"- `{arc_csv}` — per-track CSV (id, class, frame range, conf).",
     ]
     if pdf_ok:
-        readme_lines.append(f"- `{pdf_path.name}` — one-page PDF summary.")
+        readme_lines.append(f"- `{arc_pdf}` — one-page PDF summary.")
     else:
         readme_lines.append(
             "- _PDF summary skipped:_ `reportlab` is not installed. "
@@ -162,10 +174,10 @@ def build_review_pack(
 
     # Zip everything
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(annotated_mp4, annotated_mp4.name)
-        zf.write(csv_path, csv_path.name)
+        zf.write(annotated_mp4, arc_mp4)
+        zf.write(csv_path, arc_csv)
         if pdf_ok:
-            zf.write(pdf_path, pdf_path.name)
+            zf.write(pdf_path, arc_pdf)
         zf.write(readme_path, readme_path.name)
 
     # Clean up working dir

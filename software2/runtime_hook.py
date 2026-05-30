@@ -15,6 +15,14 @@ import sys
 #    already initialized."
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
+# Pin native math libraries to a single thread. Detection/tracking runs on Qt
+# worker threads in the frozen app; combined with the duplicate-OpenMP shim
+# above, multi-threaded torch/OpenCV on a 2nd worker thread heap-corrupts the
+# process on Windows (0xC0000374). Set before torch is ever imported. Batch
+# throughput is preserved (parallel workers use one core each). See processor.py.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 
 def _select_torch_dir():
     """Which directory should provide torch/torchvision (Windows frozen only).

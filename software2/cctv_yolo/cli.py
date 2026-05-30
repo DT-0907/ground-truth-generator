@@ -16,9 +16,17 @@ Usage examples:
 All commands operate on the same data root as the desktop app.
 """
 from __future__ import annotations
+import os
 import argparse
 import sys
 from pathlib import Path
+
+# Pin native math libraries to a single thread BEFORE torch is imported (see
+# processor.py): CLI `process` runs detection in-process, and multi-threaded
+# torch/OpenCV with the duplicate-OpenMP shim heap-corrupts on Windows.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 from cctv_yolo.data_manager import DataManager
 
