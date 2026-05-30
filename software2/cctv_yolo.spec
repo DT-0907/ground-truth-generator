@@ -93,6 +93,19 @@ if IS_WIN:
                 f"importlib.metadata.version('{_pkg}') would crash at runtime.")
         _torch_cpu_tree += Tree(str(_di[0]), prefix='torch_cpu_baseline/' + _di[0].name)
 
+    # Sibling top-level packages that ship INSIDE the torch wheel (next to
+    # torch/ in site-packages) and are imported by torch AT IMPORT TIME — e.g.
+    # torch.utils._python_dispatch does `import torchgen`. They carry no
+    # separate dist-info. Because torch is EXCLUDED from analysis (above),
+    # PyInstaller never follows torch's imports and so never discovers them,
+    # and they are NOT inside the torch/ tree staged above — so without this
+    # the frozen app dies on first launch with
+    # "ModuleNotFoundError: No module named 'torchgen'".
+    for _pkg in ('torchgen', 'functorch'):
+        _src = _site / _pkg
+        if _src.is_dir():
+            _torch_cpu_tree += Tree(str(_src), prefix='torch_cpu_baseline/' + _pkg)
+
     # CRITICAL: torch's DLLs (torch_cpu.dll/c10.dll/fbgemm.dll) dynamically link
     # the MSVC C/C++ runtime — msvcp140.dll, vcruntime140.dll, and especially
     # vcruntime140_1.dll (the VS2019+ EH runtime). These are NOT inside the

@@ -59,7 +59,7 @@ REM Nothing supported on the machine? Offer to auto-install Python 3.12.
 if not defined PYCMD call :install_python
 if not defined PYCMD (
     echo.
-    echo ERROR: No supported Python (3.10-3.12) is available, and the
+    echo ERROR: No supported Python ^(3.10-3.12^) is available, and the
     echo automatic install did not complete.
     echo.
     echo PyTorch ships wheels for Python 3.10, 3.11, and 3.12 ONLY.
@@ -142,9 +142,9 @@ python -m pip install torch==2.8.0 torchvision==0.23.0 --index-url https://downl
 if errorlevel 1 (
     echo.
     echo ERROR: CPU torch 2.8.0 install failed. The baked baseline must match
-    echo the GPU runtime pin (2.8.0), so this does NOT fall back to a different
+    echo the GPU runtime pin ^(2.8.0^), so this does NOT fall back to a different
     echo version. Try one of:
-    echo   - Confirm Python 3.10, 3.11, or 3.12 (delete the venv folder, re-run)
+    echo   - Confirm Python 3.10, 3.11, or 3.12 ^(delete the venv folder, re-run^)
     echo   - Check your internet connection
     goto :fail
 )
@@ -213,7 +213,13 @@ echo [4/5] Building single-file installer (Inno Setup)...
 
 REM Read the app version from the single source of truth (__version__.py).
 set "APP_VERSION="
-for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Select-String -Path 'cctv_yolo\__version__.py' -Pattern '__version__\s*=\s*\"([^\"]+)\"').Matches.Groups[1].Value"`) do set "APP_VERSION=%%v"
+REM Parse the version with findstr (no PowerShell, no parens) so cmd's
+REM for /f paren-matcher can't choke on parentheses inside an embedded
+REM command. tokens=2 delims== grabs the ` "2.2.0"` half; then strip the
+REM surrounding spaces and quotes.
+for /f "usebackq tokens=2 delims==" %%v in (`findstr /b /c:"__version__" "cctv_yolo\__version__.py"`) do set "APP_VERSION=%%v"
+set "APP_VERSION=%APP_VERSION: =%"
+set APP_VERSION=%APP_VERSION:"=%
 if not defined APP_VERSION set "APP_VERSION=0.0.0"
 echo   App version: %APP_VERSION%
 
@@ -224,7 +230,7 @@ if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%P
 if not defined ISCC for %%I in (iscc.exe ISCC.exe) do if not defined ISCC if exist "%%~$PATH:I" set "ISCC=%%~$PATH:I"
 
 if defined ISCC (
-    echo   Using Inno Setup: %ISCC%
+    echo   Using Inno Setup: "%ISCC%"
     "%ISCC%" /DAppVersion=%APP_VERSION% installer_windows.iss
     if errorlevel 1 (
         echo.
@@ -330,7 +336,7 @@ set "PY_URL=https://www.python.org/ftp/python/%PY_VER%/python-%PY_VER%-amd64.exe
 powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -UseBasicParsing -Uri '%PY_URL%' -OutFile '%PY_SETUP%'; Unblock-File '%PY_SETUP%' } catch { exit 1 }"
 if errorlevel 1 (
     echo.
-    echo Download failed (no internet, or the URL changed). Falling back to
+    echo Download failed ^(no internet, or the URL changed^). Falling back to
     echo the manual install instructions below.
     goto :eof
 )
