@@ -8,7 +8,7 @@ Sections:
 1. Local Folders: data path display + "Open" buttons for each folder
 2. NAS Connection: status indicator, config inputs, Connect/Disconnect buttons
 """
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -200,6 +200,37 @@ QDialogButtonBox QPushButton:default:hover {{
 """
 
 
+class _GpuStatusProbe(QThread):
+    """Detect GPU status OFF the GUI thread.
+
+    Querying the NVIDIA driver (nvcuda.dll / nvidia-smi) can take a moment when
+    a laptop's Optimus dGPU is parked; doing it inline while building the
+    Settings dialog froze the whole page (a colleague reported the Settings
+    buttons "do not respond"). Running it here keeps the dialog instantly
+    responsive and just updates the label when the answer arrives.
+    """
+
+    done = Signal(str)  # status text for the label
+
+    def run(self):
+        from cctv_yolo import gpu_runtime
+        try:
+            if gpu_runtime.is_installed():
+                info = gpu_runtime.installed_info() or {}
+                txt = (f"Active: PyTorch {info.get('torch', '?')} "
+                       f"({info.get('variant', '?')}) — GPU enabled.")
+            else:
+                name = gpu_runtime.gpu_name()
+                if name:
+                    txt = (f"{name} detected, currently running on CPU. "
+                           "Set up GPU acceleration for a big speedup.")
+                else:
+                    txt = "No NVIDIA GPU detected — running on CPU."
+        except Exception:
+            txt = "GPU status unavailable (the setup button still works)."
+        self.done.emit(txt)
+
+
 class SettingsDialog(QDialog):
     """Settings dialog -- local folders and NAS connection."""
 
@@ -216,6 +247,9 @@ class SettingsDialog(QDialog):
         self._setup_ui()
         self._load_nas_config()
         self._sync_nas_status()
+        # Make sure the GPU probe thread is joined before this dialog is torn
+        # down (OK/Cancel emit finished; the window X goes through closeEvent).
+        self.finished.connect(self._stop_gpu_probe)
 
     # ------------------------------------------------------------------
     # UI setup
@@ -296,27 +330,24 @@ class SettingsDialog(QDialog):
         # --- GPU Acceleration section (Windows only) ---
         import sys as _sys
         if _sys.platform == "win32":
-            from cctv_yolo import gpu_runtime
             gpu_group = QGroupBox("GPU Acceleration")
             gpu_group.setStyleSheet(GROUP_STYLE)
             gpu_layout = QVBoxLayout(gpu_group)
             gpu_layout.setSpacing(8)
-            if gpu_runtime.is_installed():
-                _info = gpu_runtime.installed_info() or {}
-                _txt = (f"Active: PyTorch {_info.get('torch', '?')} "
-                        f"({_info.get('variant', '?')}) — GPU enabled.")
-            elif gpu_runtime.gpu_name():
-                _txt = (f"{gpu_runtime.gpu_name()} detected, currently running on "
-                        "CPU. Set up GPU acceleration for a big speedup.")
-            else:
-                _txt = "No NVIDIA GPU detected — running on CPU."
-            self.lbl_gpu_status = QLabel(_txt)
+            # Detect OFF the GUI thread (see _GpuStatusProbe) so a slow NVIDIA
+            # driver query can never freeze the Settings page. Show a neutral
+            # placeholder until the probe answers.
+            self.lbl_gpu_status = QLabel("Checking for an NVIDIA GPU…")
             self.lbl_gpu_status.setWordWrap(True)
             gpu_layout.addWidget(self.lbl_gpu_status)
             self.btn_setup_gpu = QPushButton("Set up / repair GPU acceleration")
             self.btn_setup_gpu.clicked.connect(self._on_setup_gpu)
             gpu_layout.addWidget(self.btn_setup_gpu)
             layout.addWidget(gpu_group)
+
+            self._gpu_probe = _GpuStatusProbe(self)
+            self._gpu_probe.done.connect(self._on_gpu_status)
+            self._gpu_probe.start()
 
         # --- NAS Connection section ---
         nas_group = QGroupBox("NAS Connection (Tailscale SMB)")
@@ -448,6 +479,22 @@ class SettingsDialog(QDialog):
                 f"Active: PyTorch {info.get('torch', '?')} "
                 f"({info.get('variant', '?')}). Restart CCTV-YOLO to use it."
             )
+
+    def _on_gpu_status(self, text: str):
+        """Update the GPU label once the off-thread probe finishes."""
+        if hasattr(self, "lbl_gpu_status"):
+            self.lbl_gpu_status.setText(text)
+
+    def _stop_gpu_probe(self, *_):
+        # Never let the dialog be destroyed while the GPU probe thread is still
+        # running — that aborts the process. The probe is quick; wait briefly.
+        probe = getattr(self, "_gpu_probe", None)
+        if probe is not None and probe.isRunning():
+            probe.wait(3000)
+
+    def closeEvent(self, event):
+        self._stop_gpu_probe()
+        super().closeEvent(event)
 
     def _load_nas_config(self):
         """Load saved NAS config into the form inputs."""

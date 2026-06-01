@@ -24,6 +24,7 @@ self-contained, so the feature is gated to ``sys.platform == 'win32'``.
 """
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import logging
@@ -170,26 +171,74 @@ def _run_smi(args: list[str]) -> str:
     try:
         out = subprocess.run(
             args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            timeout=10, creationflags=_NO_WINDOW,
+            timeout=4, creationflags=_NO_WINDOW,
         )
         return out.stdout.decode("utf-8", "replace")
     except Exception:
         return ""
 
 
+@lru_cache(maxsize=1)
+def _nvcuda_probe() -> tuple[int, str]:
+    """Detect the NVIDIA GPU directly via the CUDA driver DLL (``nvcuda.dll``).
+
+    Returns ``(cuda_driver_code, gpu_name)`` — e.g. ``(1208, "NVIDIA GeForce
+    RTX 4090 Laptop GPU")`` — or ``(0, "")`` if there's no usable NVIDIA GPU.
+
+    This is the PRIMARY detector: it's torch-free, nvidia-smi-free, needs no
+    subprocess, and queries the installed driver directly, so it works on the
+    machines where ``nvidia-smi`` silently returns nothing — off-PATH, or a
+    laptop whose Optimus dGPU was parked when queried (the exact failure a
+    colleague hit on an RTX 4090 laptop: card present and working, yet "Set up
+    GPU" reported "no NVIDIA GPU"). We require a real CUDA device
+    (``cuInit`` + ``cuDeviceGetCount >= 1``) so a driver-without-GPU never
+    registers as a false positive. ``cuDriverGetVersion`` returns the max CUDA
+    the driver supports (e.g. 12080 == 12.8), which is exactly what picks
+    cu128 vs cu118.
+    """
+    if sys.platform != "win32":
+        return (0, "")
+    try:
+        lib = ctypes.WinDLL("nvcuda.dll")
+    except OSError:
+        return (0, "")  # no NVIDIA driver installed
+    try:
+        if lib.cuInit(0) != 0:
+            return (0, "")                       # CUDA_ERROR_NO_DEVICE etc.
+        cnt = ctypes.c_int(0)
+        if lib.cuDeviceGetCount(ctypes.byref(cnt)) != 0 or cnt.value < 1:
+            return (0, "")
+        ver = ctypes.c_int(0)
+        code = 0
+        if lib.cuDriverGetVersion(ctypes.byref(ver)) == 0 and ver.value > 0:
+            code = (ver.value // 1000) * 100 + (ver.value % 1000) // 10  # 12080 -> 1208
+        dev = ctypes.c_int(0)
+        name = ""
+        if lib.cuDeviceGet(ctypes.byref(dev), 0) == 0:
+            buf = ctypes.create_string_buffer(256)
+            if lib.cuDeviceGetName(buf, 256, dev) == 0:
+                name = buf.value.decode("utf-8", "replace").strip()
+        logger.info("nvcuda probe: cuda_code=%s name=%r", code, name or "NVIDIA GPU")
+        return (code, name or "NVIDIA GPU")
+    except Exception:
+        logger.debug("nvcuda probe failed", exc_info=True)
+        return (0, "")
+
+
 def _torch_cuda_view() -> tuple[str | None, str | None]:
-    """(gpu_name, wheel_variant) inferred from an already-loaded torch that can
+    """(gpu_name, wheel_variant) inferred from an ALREADY-LOADED torch that can
     see CUDA, or (None, None).
 
-    This is the authoritative fallback once torch is importable: if torch is
-    *already running on the GPU* (a downloaded CUDA build is active), then there
-    is unquestionably a usable NVIDIA GPU here, regardless of whether nvidia-smi
-    happened to answer (e.g. it's off-PATH, or a laptop's Optimus dGPU was in a
-    low-power state when queried). cu128 covers every arch we ship kernels for
-    (sm_70..sm_120), so it's the correct variant whenever torch already works.
+    Last-resort fallback: if a downloaded CUDA build is already active, there is
+    unquestionably a usable NVIDIA GPU. IMPORTANT: this never *imports* torch —
+    it only inspects ``sys.modules`` — so it can't trigger a multi-second torch
+    import on the GUI thread (the Settings panel calls into here while building).
+    cu128 covers every arch we ship kernels for (sm_70..sm_120).
     """
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return (None, None)
     try:
-        import torch
         if not bool(torch.cuda.is_available()):
             return (None, None)
         try:
@@ -203,28 +252,36 @@ def _torch_cuda_view() -> tuple[str | None, str | None]:
 
 @lru_cache(maxsize=1)
 def _driver_cuda_code() -> int:
-    """Parse 'CUDA Version: 12.8' from nvidia-smi -> 1208. 0 if no NVIDIA GPU.
+    """CUDA driver version as ``major*100+minor`` (e.g. 1208 for CUDA 12.8), or
+    0 if no usable NVIDIA GPU.
 
-    Cached: nvidia-smi is slow-ish and the driver can't change mid-process, so
-    should_offer()/the dialog/Settings all reuse one query instead of stalling
-    the GUI thread repeatedly.
+    Prefers the CUDA driver DLL (fast, reliable, no subprocess) and only falls
+    back to parsing ``nvidia-smi`` if that DLL probe comes up empty. Cached.
     """
+    code, _ = _nvcuda_probe()
+    if code > 0:
+        return code
     m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", _run_smi(["nvidia-smi"]))
-    if not m:
-        return 0
-    return int(m.group(1)) * 100 + int(m.group(2))
+    if m:
+        return int(m.group(1)) * 100 + int(m.group(2))
+    return 0
 
 
 @lru_cache(maxsize=1)
 def gpu_name() -> str:
-    """First NVIDIA GPU name, or '' if none. Cached (see _driver_cuda_code).
+    """First NVIDIA GPU name, or '' if none. Cached.
 
-    Falls back to torch's own device name when nvidia-smi can't be reached but
-    torch is already on the GPU.
+    nvcuda.dll first (works when nvidia-smi can't be reached), then nvidia-smi,
+    then an already-loaded torch.
     """
+    _, name = _nvcuda_probe()
+    if name and name != "NVIDIA GPU":
+        return name
     txt = _run_smi(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
-    name = txt.strip().splitlines()[0].strip() if txt.strip() else ""
-    if name:
+    smi_name = txt.strip().splitlines()[0].strip() if txt.strip() else ""
+    if smi_name:
+        return smi_name
+    if name:                       # generic "NVIDIA GPU" from nvcuda
         return name
     tname, _ = _torch_cuda_view()
     return tname or ""
@@ -241,12 +298,11 @@ def desired_variant() -> str | None:
         return None
     code = _driver_cuda_code()
     if code <= 0:
+        logger.info("desired_variant: no NVIDIA GPU detected (driver code=0)")
         return None
-    if code >= 1208:
-        return "cu128"
-    if code >= 1108:
-        return "cu118"
-    return None
+    variant = "cu128" if code >= 1208 else ("cu118" if code >= 1108 else None)
+    logger.info("desired_variant: driver cuda code=%s -> %s", code, variant)
+    return variant
 
 
 def variant_for_setup() -> str | None:
