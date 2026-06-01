@@ -134,7 +134,39 @@ def clear_declined() -> None:
 # --------------------------------------------------------------------------
 # GPU / variant detection (nvidia-smi; no torch needed)
 # --------------------------------------------------------------------------
+@lru_cache(maxsize=1)
+def _nvidia_smi() -> str:
+    """Absolute path to nvidia-smi.exe, or the bare name as a last resort.
+
+    Modern drivers drop nvidia-smi.exe into System32 (always on PATH), but some
+    laptop OEM driver packages only place it under
+    ``Program Files\\NVIDIA Corporation\\NVSMI`` — which is NOT on PATH — so a
+    bare ``nvidia-smi`` invocation silently finds nothing and we wrongly report
+    "no GPU" on a machine that clearly has one. Probe the known locations.
+    """
+    exe = "nvidia-smi.exe" if sys.platform == "win32" else "nvidia-smi"
+    found = shutil.which(exe) or shutil.which("nvidia-smi")
+    if found:
+        return found
+    candidates = []
+    sysroot = os.environ.get("SystemRoot") or r"C:\Windows"
+    candidates.append(Path(sysroot) / "System32" / exe)
+    for pf in (os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles"),
+               r"C:\Program Files"):
+        if pf:
+            candidates.append(Path(pf) / "NVIDIA Corporation" / "NVSMI" / exe)
+    for c in candidates:
+        try:
+            if c.is_file():
+                return str(c)
+        except OSError:
+            continue
+    return exe  # nothing found; let the OS try to resolve it at call time
+
+
 def _run_smi(args: list[str]) -> str:
+    if args and args[0] == "nvidia-smi":
+        args = [_nvidia_smi(), *args[1:]]
     try:
         out = subprocess.run(
             args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -143,6 +175,30 @@ def _run_smi(args: list[str]) -> str:
         return out.stdout.decode("utf-8", "replace")
     except Exception:
         return ""
+
+
+def _torch_cuda_view() -> tuple[str | None, str | None]:
+    """(gpu_name, wheel_variant) inferred from an already-loaded torch that can
+    see CUDA, or (None, None).
+
+    This is the authoritative fallback once torch is importable: if torch is
+    *already running on the GPU* (a downloaded CUDA build is active), then there
+    is unquestionably a usable NVIDIA GPU here, regardless of whether nvidia-smi
+    happened to answer (e.g. it's off-PATH, or a laptop's Optimus dGPU was in a
+    low-power state when queried). cu128 covers every arch we ship kernels for
+    (sm_70..sm_120), so it's the correct variant whenever torch already works.
+    """
+    try:
+        import torch
+        if not bool(torch.cuda.is_available()):
+            return (None, None)
+        try:
+            name = torch.cuda.get_device_name(0)
+        except Exception:
+            name = None
+    except Exception:
+        return (None, None)
+    return (name or "NVIDIA GPU", "cu128")
 
 
 @lru_cache(maxsize=1)
@@ -161,9 +217,17 @@ def _driver_cuda_code() -> int:
 
 @lru_cache(maxsize=1)
 def gpu_name() -> str:
-    """First NVIDIA GPU name, or '' if none. Cached (see _driver_cuda_code)."""
+    """First NVIDIA GPU name, or '' if none. Cached (see _driver_cuda_code).
+
+    Falls back to torch's own device name when nvidia-smi can't be reached but
+    torch is already on the GPU.
+    """
     txt = _run_smi(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
-    return txt.strip().splitlines()[0].strip() if txt.strip() else ""
+    name = txt.strip().splitlines()[0].strip() if txt.strip() else ""
+    if name:
+        return name
+    tname, _ = _torch_cuda_view()
+    return tname or ""
 
 
 def desired_variant() -> str | None:
@@ -183,6 +247,28 @@ def desired_variant() -> str | None:
     if code >= 1108:
         return "cu118"
     return None
+
+
+def variant_for_setup() -> str | None:
+    """Best CUDA variant for the Settings 'Set up / repair' button.
+
+    desired_variant() trusts nvidia-smi alone, which gives a false "no GPU" on
+    machines where nvidia-smi is off-PATH or the laptop dGPU was asleep when
+    queried — even when a CUDA torch is already installed and running. Widen the
+    evidence: live driver query, then the already-installed manifest, then what
+    torch currently reports. Returns None only when nothing anywhere indicates
+    an NVIDIA GPU.
+    """
+    if sys.platform != "win32":
+        return None
+    v = desired_variant()
+    if v:
+        return v
+    info = installed_info()
+    if info and info.get("variant") in _PINS:
+        return info["variant"]
+    _name, tv = _torch_cuda_view()
+    return tv
 
 
 def should_offer() -> tuple[bool, str | None]:

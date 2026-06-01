@@ -413,7 +413,10 @@ class SettingsDialog(QDialog):
         """Open the GPU acceleration setup dialog (Settings -> GPU)."""
         from cctv_yolo import gpu_runtime
         from cctv_yolo.gpu_setup_dialog import GpuSetupDialog
-        variant = gpu_runtime.desired_variant()
+        # variant_for_setup() (not desired_variant()) so we don't falsely claim
+        # "no GPU" when nvidia-smi is off-PATH / the dGPU was asleep but a CUDA
+        # torch is already installed and running.
+        variant = gpu_runtime.variant_for_setup()
         if not variant:
             QMessageBox.information(
                 self, "GPU Acceleration",
@@ -421,6 +424,22 @@ class SettingsDialog(QDialog):
                 "to install. CCTV-YOLO runs on CPU here.",
             )
             return
+        # Already installed and running on the GPU: don't push a redundant
+        # multi-GB re-download at them — confirm it's active and let them
+        # reinstall only if they actually want to repair it.
+        if gpu_runtime.is_installed():
+            info = gpu_runtime.installed_info() or {}
+            resp = QMessageBox.question(
+                self, "GPU Acceleration",
+                f"GPU acceleration is already installed and active "
+                f"(PyTorch {info.get('torch', '?')}, {info.get('variant', '?')}).\n\n"
+                "Reinstall it anyway? (Only needed if it's behaving oddly — this "
+                "re-downloads several GB.)",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if resp != QMessageBox.Yes:
+                return
         gpu_runtime.clear_declined()
         GpuSetupDialog(variant, parent=self).exec()
         if gpu_runtime.is_installed() and hasattr(self, "lbl_gpu_status"):
