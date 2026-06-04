@@ -862,7 +862,7 @@ class AnalyticsTab(QWidget):
         if not video_path:
             QMessageBox.warning(self, "No video", "Video file missing for session.")
             return
-        out = self.dm.exports_dir / sid / f"{sid}_heatmap.png"
+        out = self.dm.exports_dir / sid / "heatmap.png"
         self.hm_status.setText("rendering…")
         self._spawn("heatmap", {
             "video_path": video_path,
@@ -917,7 +917,7 @@ class AnalyticsTab(QWidget):
         data = self._load_track_data(sid)
         if not data:
             return
-        out = self.dm.exports_dir / sid / f"{sid}_od_matrix.csv"
+        out = self.dm.exports_dir / sid / "od_matrix.csv"
         self.od_status.setText("computing…")
         self._spawn("od", {"track_data": data, "output_path": out},
                     lambda op, r: self._on_od(op, r))
@@ -1005,7 +1005,7 @@ class AnalyticsTab(QWidget):
         data = self._load_track_data(sid)
         if not data:
             return
-        out = self.dm.exports_dir / sid / f"{sid}_timeseries.csv"
+        out = self.dm.exports_dir / sid / "timeseries.csv"
         self.ts_status.setText("computing…")
         self._spawn("timeseries", {
             "track_data": data,
@@ -1084,7 +1084,7 @@ class AnalyticsTab(QWidget):
         data = self._load_track_data(sid)
         if not data:
             return
-        out = self.dm.exports_dir / sid / f"{sid}_speeds.csv"
+        out = self.dm.exports_dir / sid / "speeds.csv"
         self.sp_status.setText("computing…")
         self._spawn("speeds", {
             "track_data": data,

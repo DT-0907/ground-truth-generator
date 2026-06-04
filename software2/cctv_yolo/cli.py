@@ -77,7 +77,10 @@ def cmd_annotate(args):
         print(f"No data for session {args.session_id}")
         return 1
     video_path = dm.get_video_path(args.session_id)
-    out = dm.exports_dir / args.session_id / f"{args.session_id}_annotated.mp4"
+    if not video_path:
+        print(f"Video not found for session {args.session_id}")
+        return 1
+    out = dm.exports_dir / args.session_id / "annotated.mp4"
     stats = annotate_video(video_path, track_data, out, blur_lp=args.blur_lp)
     print(f"Wrote {stats['output_path']} ({stats['frames_written']} frames)")
     return 0
@@ -91,7 +94,10 @@ def cmd_heatmap(args):
         print(f"No data for {args.session_id}")
         return 1
     video_path = dm.get_video_path(args.session_id)
-    out = dm.exports_dir / args.session_id / f"{args.session_id}_heatmap.png"
+    if not video_path:
+        print(f"Video not found for session {args.session_id}")
+        return 1
+    out = dm.exports_dir / args.session_id / "heatmap.png"
     p = analytics.render_heatmap(video_path, data, out, sigma=args.sigma)
     print(f"Wrote {p}")
     return 0
@@ -104,7 +110,7 @@ def cmd_timeseries(args):
     if not data:
         print(f"No data for {args.session_id}")
         return 1
-    out = dm.exports_dir / args.session_id / f"{args.session_id}_timeseries.csv"
+    out = dm.exports_dir / args.session_id / "timeseries.csv"
     p = analytics.time_series_csv(data, out, bucket_seconds=args.bucket)
     print(f"Wrote {p}")
     return 0
@@ -117,7 +123,7 @@ def cmd_speeds(args):
     if not data:
         print(f"No data for {args.session_id}")
         return 1
-    out = dm.exports_dir / args.session_id / f"{args.session_id}_speeds.csv"
+    out = dm.exports_dir / args.session_id / "speeds.csv"
     speeds = analytics.estimate_speeds(data, pixels_per_meter=args.ppm)
     analytics.write_speeds_csv(speeds, out)
     print(f"Wrote {out} ({len(speeds)} speeds)")
@@ -153,7 +159,22 @@ def cmd_train(args):
         batch=args.batch,
         models_dir=str(dm.models_dir),
     )
-    worker.log_line.connect(lambda line: print(line))
+    # Write log lines to the REAL stdout captured HERE, before training starts.
+    # TrainingWorker.run() swaps the process-global sys.stdout to an _EmitWriter
+    # that re-emits log_line; this slot runs in the worker thread (a plain
+    # callable connects as DirectConnection), so a bare print() would go back
+    # into that writer and re-emit -> infinite recursion -> native STACK_OVERFLOW
+    # (0xC00000FD). Writing to the captured console stream breaks the cycle.
+    _console = sys.stdout
+
+    def _print_log(line):
+        try:
+            _console.write(line + "\n")
+            _console.flush()
+        except Exception:
+            pass
+
+    worker.log_line.connect(_print_log)
 
     from PySide6.QtCore import QCoreApplication
     app = QCoreApplication.instance() or QCoreApplication(sys.argv)

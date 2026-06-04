@@ -140,7 +140,7 @@ def render_html_report(
     ) or "<tr><td colspan='2' class='muted'>(none)</td></tr>"
 
     # Heatmap — render if missing
-    hm = sess_dir / f"{session_id}_heatmap.png"
+    hm = sess_dir / "heatmap.png"
     heatmap_block = ""
     try:
         if not hm.exists() and video_path:
@@ -216,7 +216,7 @@ def render_html_report(
 
     # Annotated video (link, not embedded by default — file size)
     video_block = ""
-    annotated = sess_dir / f"{session_id}_annotated.mp4"
+    annotated = sess_dir / "annotated.mp4"
     if annotated.exists():
         if embed_video:
             b64 = base64.b64encode(annotated.read_bytes()).decode("ascii")

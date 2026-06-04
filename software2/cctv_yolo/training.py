@@ -312,6 +312,14 @@ class TrainingWorker(QThread):
         parent=None,
     ):
         super().__init__(parent)
+        # Ultralytics/torch training has very deep native call stacks (model
+        # construction + autograd graph build). A QThread's default OS stack
+        # (~1 MB on Windows) overflows before the first epoch with a native
+        # STACK_OVERFLOW (0xC00000FD) — the identical train() call runs fine on
+        # the main thread, which has a much larger stack. Reserve a generous
+        # stack so training runs on this worker thread without crashing. This is
+        # a no-op cost on POSIX, where the default thread stack is already ample.
+        self.setStackSize(256 * 1024 * 1024)
         self.data_yaml = data_yaml
         self.base_model = base_model
         self.epochs = epochs
@@ -446,8 +454,17 @@ class TrainingWorker(QThread):
                 def __init__(self, emit):
                     self._emit = emit
                     self._buf = ""
+                    self._in_write = False
 
                 def write(self, s):
+                    # Reentrancy guard: redirect_stdout below makes this writer
+                    # the process-global stdout, so a log_line slot that prints
+                    # (e.g. a DirectConnection slot in this same thread) would
+                    # re-enter write() and recurse forever -> native
+                    # STACK_OVERFLOW. Drop nested writes instead of overflowing.
+                    if self._in_write:
+                        return len(s)
+                    self._in_write = True
                     try:
                         self._buf += s
                         while "\n" in self._buf:
@@ -457,6 +474,8 @@ class TrainingWorker(QThread):
                                 self._emit(line)
                     except Exception:
                         pass
+                    finally:
+                        self._in_write = False
                     return len(s)
 
                 def flush(self):

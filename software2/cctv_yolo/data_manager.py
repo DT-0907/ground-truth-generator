@@ -794,7 +794,7 @@ class DataManager(QObject):
                     }
                 )
 
-            filename = f"{session_id}_frame_{frame_num:06d}.jpg"
+            filename = f"frame_{frame_num:06d}.jpg"
             cv2.imwrite(
                 str(output_dir / filename), frame, [cv2.IMWRITE_JPEG_QUALITY, 90]
             )
