@@ -645,12 +645,18 @@ class DataManager(QObject):
         if not path:
             return
         path.mkdir(parents=True, exist_ok=True)
+        # Windowed frozen builds (console=False) have invalid std handles; a
+        # child that inherits them raises WinError 6 and nothing opens. Give
+        # the child explicit DEVNULL streams.
+        quiet = dict(stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
         if sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
+            subprocess.Popen(["open", str(path)], **quiet)
         elif sys.platform == "win32":
-            subprocess.Popen(["explorer", str(path)])
+            subprocess.Popen(["explorer", str(path)], **quiet)
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            subprocess.Popen(["xdg-open", str(path)], **quiet)
 
     # ------------------------------------------------------------------
     # App info

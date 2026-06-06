@@ -654,6 +654,12 @@ class ModelsTab(QWidget):
 
         def _ok(path: str):
             progress.close()
+            # Auto-select the freshly downloaded model when nothing is active
+            # yet, so a first download is immediately usable (otherwise the
+            # processing tabs report "no model selected" despite the file
+            # being present in models/).
+            if not self.dm.get_last_model():
+                self.dm.set_last_model(model_name)
             QMessageBox.information(
                 self, "Download complete",
                 f"{model_name} saved to:\n{path}"

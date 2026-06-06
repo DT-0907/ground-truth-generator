@@ -81,31 +81,39 @@ def open_path(path: Path | str, *, select: bool = False) -> None:
     target = path
     use_select = select and path.is_file()
 
+    # In a windowed (console=False) frozen build the parent's std handles are
+    # invalid; a subprocess that inherits them raises WinError 6 and the
+    # Explorer/Finder window never opens. Hand every child explicit DEVNULL
+    # streams so it never reaches for the missing console.
+    _quiet = dict(stdin=subprocess.DEVNULL,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL)
+
     try:
         if sys.platform == "darwin":
             if use_select:
-                subprocess.Popen(["open", "-R", str(target)])
+                subprocess.Popen(["open", "-R", str(target)], **_quiet)
             else:
                 # If the path doesn't exist yet, fall back to parent
                 if not target.exists() and target.parent.exists():
                     target = target.parent
-                subprocess.Popen(["open", str(target)])
+                subprocess.Popen(["open", str(target)], **_quiet)
         elif sys.platform == "win32":
             if use_select:
                 # explorer /select, requires a comma immediately after the flag
-                subprocess.Popen(["explorer", f"/select,{target}"])
+                subprocess.Popen(["explorer", f"/select,{target}"], **_quiet)
             else:
                 if not target.exists() and target.parent.exists():
                     target = target.parent
-                subprocess.Popen(["explorer", str(target)])
+                subprocess.Popen(["explorer", str(target)], **_quiet)
         else:
             # Linux: xdg-open doesn't support select; open the parent folder
             if use_select:
                 target = target.parent
             elif not target.exists() and target.parent.exists():
                 target = target.parent
-            subprocess.Popen(["xdg-open", str(target)])
-    except FileNotFoundError as e:
+            subprocess.Popen(["xdg-open", str(target)], **_quiet)
+    except (FileNotFoundError, OSError) as e:
         logger.error("Couldn't open %s: %s", target, e)
 
 

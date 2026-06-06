@@ -303,16 +303,21 @@ class MainWindow(QMainWindow):
         from cctv_yolo.logging_config import get_log_file_path
         log_path = get_log_file_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        # DEVNULL streams: windowed frozen builds have no console to inherit,
+        # so an inheriting child raises WinError 6 and never opens.
+        quiet = dict(stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
         if sys.platform == "darwin":
             subprocess.Popen(["open", "-R", str(log_path)] if log_path.exists()
-                             else ["open", str(log_path.parent)])
+                             else ["open", str(log_path.parent)], **quiet)
         elif sys.platform == "win32":
             if log_path.exists():
-                subprocess.Popen(["explorer", "/select,", str(log_path)])
+                subprocess.Popen(["explorer", "/select,", str(log_path)], **quiet)
             else:
-                subprocess.Popen(["explorer", str(log_path.parent)])
+                subprocess.Popen(["explorer", str(log_path.parent)], **quiet)
         else:
-            subprocess.Popen(["xdg-open", str(log_path.parent)])
+            subprocess.Popen(["xdg-open", str(log_path.parent)], **quiet)
 
     # ------------------------------------------------------------------
     # Settings dialog
