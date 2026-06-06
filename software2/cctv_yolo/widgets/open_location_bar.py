@@ -17,6 +17,7 @@ Cross-platform behavior:
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -74,6 +75,22 @@ def _resolve(source: PathSource) -> Path | None:
     return Path(source)
 
 
+def _shell_env() -> dict:
+    """Child-process environment that won't make a spawned Explorer load the
+    frozen app's bundled DLLs. PyInstaller's onedir bundle dir (``sys._MEIPASS``)
+    sits on the DLL search path; an ``explorer.exe`` spawned via subprocess
+    inherits it, pulls in our incompatible Qt/MSVC DLLs, and dies before any
+    window appears — silently, with no exception. Strip the bundle dir from the
+    child's PATH so it resolves system DLLs instead."""
+    env = dict(os.environ)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        keep = [p for p in env.get("PATH", "").split(os.pathsep)
+                if p and meipass.lower() not in p.lower()]
+        env["PATH"] = os.pathsep.join(keep)
+    return env
+
+
 def open_path(path: Path | str, *, select: bool = False) -> None:
     """Cross-platform open. If ``select=True`` and ``path`` is a file, opens
     its parent folder with the file highlighted."""
@@ -81,10 +98,10 @@ def open_path(path: Path | str, *, select: bool = False) -> None:
     target = path
     use_select = select and path.is_file()
 
-    # In a windowed (console=False) frozen build the parent's std handles are
-    # invalid; a subprocess that inherits them raises WinError 6 and the
-    # Explorer/Finder window never opens. Hand every child explicit DEVNULL
-    # streams so it never reaches for the missing console.
+    # DEVNULL streams + cleaned env: in a windowed frozen build a subprocess
+    # that inherits the (missing) console handles or the bundled-DLL PATH fails
+    # silently. Folders use os.startfile (ShellExecute) which the running shell
+    # handles in its own context — immune to both problems.
     _quiet = dict(stdin=subprocess.DEVNULL,
                   stdout=subprocess.DEVNULL,
                   stderr=subprocess.DEVNULL)
@@ -100,12 +117,17 @@ def open_path(path: Path | str, *, select: bool = False) -> None:
                 subprocess.Popen(["open", str(target)], **_quiet)
         elif sys.platform == "win32":
             if use_select:
-                # explorer /select, requires a comma immediately after the flag
-                subprocess.Popen(["explorer", f"/select,{target}"], **_quiet)
+                # Reveal-and-select needs explorer; run it with the bundle dir
+                # stripped from PATH so it doesn't load our DLLs and die.
+                subprocess.Popen(["explorer", f"/select,{target}"],
+                                 env=_shell_env(), **_quiet)
             else:
                 if not target.exists() and target.parent.exists():
                     target = target.parent
-                subprocess.Popen(["explorer", str(target)], **_quiet)
+                # ShellExecute via the running shell — robust where
+                # subprocess.Popen(["explorer", ...]) silently fails in a
+                # frozen windowed build.
+                os.startfile(str(target))  # type: ignore[attr-defined]
         else:
             # Linux: xdg-open doesn't support select; open the parent folder
             if use_select:

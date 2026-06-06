@@ -301,21 +301,20 @@ class MainWindow(QMainWindow):
         """PRD C4 — Help → Show Log Folder opens <data_root>/logs/."""
         import subprocess
         from cctv_yolo.logging_config import get_log_file_path
+        import os
         log_path = get_log_file_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        # DEVNULL streams: windowed frozen builds have no console to inherit,
-        # so an inheriting child raises WinError 6 and never opens.
         quiet = dict(stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL)
-        if sys.platform == "darwin":
+        if sys.platform == "win32":
+            # os.startfile (ShellExecute) opens reliably in the windowed frozen
+            # build, where a spawned explorer.exe inherits the bundled-DLL PATH
+            # and dies silently. Open the logs folder directly.
+            os.startfile(str(log_path.parent))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", str(log_path)] if log_path.exists()
                              else ["open", str(log_path.parent)], **quiet)
-        elif sys.platform == "win32":
-            if log_path.exists():
-                subprocess.Popen(["explorer", "/select,", str(log_path)], **quiet)
-            else:
-                subprocess.Popen(["explorer", str(log_path.parent)], **quiet)
         else:
             subprocess.Popen(["xdg-open", str(log_path.parent)], **quiet)
 
