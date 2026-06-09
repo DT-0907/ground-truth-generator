@@ -37,11 +37,14 @@ RestartApplications=no
 Source: "dist\CCTV-YOLO\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{group}\CCTV-YOLO"; Filename: "{app}\CCTV-YOLO.exe"
-Name: "{autodesktop}\CCTV-YOLO"; Filename: "{app}\CCTV-YOLO.exe"; Tasks: desktopicon
+; WorkingDir = the install dir so the shortcut launches with the same cwd the
+; CCTV-YOLO-debug.bat uses (`cd /d %~dp0`). Removes cwd as a variable in DLL
+; resolution for the bundled torch runtime.
+Name: "{group}\CCTV-YOLO"; Filename: "{app}\CCTV-YOLO.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\CCTV-YOLO"; Filename: "{app}\CCTV-YOLO.exe"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Run]
-Filename: "{app}\CCTV-YOLO.exe"; Description: "Launch CCTV-YOLO"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\CCTV-YOLO.exe"; WorkingDir: "{app}"; Description: "Launch CCTV-YOLO"; Flags: nowait postinstall skipifsilent

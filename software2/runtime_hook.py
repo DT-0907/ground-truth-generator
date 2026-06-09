@@ -9,6 +9,47 @@ ships inside the bundle. See cctv_yolo/gpu_runtime.py and cctv_yolo.spec.
 import os
 import sys
 
+# --- Windowed frozen build: give native code valid standard file descriptors --
+# CCTV-YOLO.exe is windowed (console=False), so on Windows fd 0/1/2 are INVALID
+# and sys.stdout/stderr are None. Native libraries in torch's import chain
+# (CUDA / cuBLAS / cuDNN / MKL init) write to the C-level stderr while their DLLs
+# load; with an invalid fd 2 that can abort the extension load and surface as
+# torch's misleading "Failed to load PyTorch C extensions / loaded the torch/_C
+# folder rather than the C extensions" — but ONLY for the windowed exe, never
+# the console CCTV-YOLO-debug.exe (whose fds are valid). That is exactly why
+# double-clicking the desktop icon crashed while CCTV-YOLO-debug.bat (which runs
+# the console exe AND redirects `> log 2>&1`) worked. Bind 0/1/2 to NUL so every
+# native write lands somewhere valid. MUST run before any torch import — this
+# runtime hook is the very first code in the frozen app.
+if sys.platform == "win32" and getattr(sys, "frozen", False):
+    try:
+        _nul = os.open(os.devnull, os.O_RDWR)
+        for _fd in (0, 1, 2):
+            try:
+                os.fstat(_fd)            # valid (console / redirected) -> keep
+            except OSError:
+                try:
+                    os.dup2(_nul, _fd)   # invalid (windowed) -> point at NUL
+                except OSError:
+                    pass
+        if _nul > 2:
+            os.close(_nul)
+    except Exception:
+        pass
+    # Keep the Python-level streams non-None too, so pure-Python writes in the
+    # import chain (warnings, tqdm, print) don't raise on None either.
+    for _name in ("stdout", "stderr"):
+        if getattr(sys, _name, None) is None:
+            try:
+                setattr(sys, _name, open(os.devnull, "w"))
+            except Exception:
+                pass
+    if getattr(sys, "stdin", None) is None:
+        try:
+            sys.stdin = open(os.devnull, "r")
+        except Exception:
+            pass
+
 # OpenMP duplicate-library fix. On Windows, numpy (MKL) and torch both pull in
 # libiomp5md.dll; without this the process aborts on `import torch` with:
 #   "OMP: Error #15: Initializing libiomp5md.dll, but found libiomp5md.dll

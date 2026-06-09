@@ -112,21 +112,39 @@ def _run_selftest() -> int:
     is the headless check that the venv-only smoke test could not give us.
     """
     import traceback
+    import tempfile
+    # Tee to a file as well as stdout: the WINDOWED exe (CCTV-YOLO.exe) has its
+    # stdout bound to NUL by the runtime hook, so a file is the only way to read
+    # the result of a self-test run against the real production exe.
+    _logpath = os.path.join(tempfile.gettempdir(), "cctv_selftest.log")
+    try:
+        _logf = open(_logpath, "w", encoding="utf-8")
+    except Exception:
+        _logf = None
+
+    def _say(msg):
+        print(msg, flush=True)
+        if _logf is not None:
+            try:
+                _logf.write(msg + "\n"); _logf.flush()
+            except Exception:
+                pass
+
     try:
         import numpy as np
         import torch
         dev = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
-        print(f"SELFTEST torch={torch.__version__} cuda={torch.cuda.is_available()} "
-              f"device={dev}", flush=True)
+        _say(f"SELFTEST torch={torch.__version__} cuda={torch.cuda.is_available()} "
+             f"device={dev}")
         _ = (torch.ones(16) + torch.ones(16)).sum().item()            # torch C ext
         import torchvision
-        print(f"SELFTEST torchvision={torchvision.__version__}", flush=True)
+        _say(f"SELFTEST torchvision={torchvision.__version__}")
         import torchvision.ops as _tvo                                # compiled ops
         _keep = _tvo.nms(torch.tensor([[0., 0., 10., 10.], [1., 1., 11., 11.]]),
                          torch.tensor([0.9, 0.8]), 0.5)
-        print(f"SELFTEST torchvision.ops.nms ok keep={_keep.tolist()}", flush=True)
+        _say(f"SELFTEST torchvision.ops.nms ok keep={_keep.tolist()}")
         from ultralytics import YOLO                                  # the modulefinder path
-        print("SELFTEST ultralytics import ok", flush=True)
+        _say("SELFTEST ultralytics import ok")
         # Prefer a real model if the user has one; else build from architecture
         # (no weights, no network) — either way runs a full forward pass.
         model_ref = "yolov8n.yaml"
@@ -141,13 +159,18 @@ def _run_selftest() -> int:
             pass
         model = YOLO(model_ref)
         res = model.predict(np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
-        print(f"SELFTEST inference ok model={model_ref} results={len(res)}", flush=True)
-        print("SELFTEST PASS", flush=True)
+        _say(f"SELFTEST inference ok model={model_ref} results={len(res)}")
+        _say("SELFTEST PASS")
         return 0
     except BaseException:
-        traceback.print_exc()
-        print("SELFTEST FAIL", flush=True)
+        _say("SELFTEST FAIL\n" + traceback.format_exc())
         return 1
+    finally:
+        if _logf is not None:
+            try:
+                _logf.close()
+            except Exception:
+                pass
 
 
 def main():
