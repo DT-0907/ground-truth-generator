@@ -96,8 +96,67 @@ def _make_dark_palette():
     return palette
 
 
+def _run_selftest() -> int:
+    """Headless import + inference self-test for the FROZEN build.
+
+    Exercises the exact heavy chain the GUI hits on "Process":
+        torch (C ext) -> torchvision (the `from modulefinder import Module`
+        line + compiled ops) -> `from ultralytics import YOLO` -> one inference.
+
+    Gated behind CCTV_YOLO_SELFTEST=1 so it ships harmlessly. Run it on any
+    machine to verify a build without loading a video:
+
+        set CCTV_YOLO_SELFTEST=1 && CCTV-YOLO-debug.exe
+
+    Prints SELFTEST PASS / SELFTEST FAIL and a full traceback on failure — this
+    is the headless check that the venv-only smoke test could not give us.
+    """
+    import traceback
+    try:
+        import numpy as np
+        import torch
+        dev = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+        print(f"SELFTEST torch={torch.__version__} cuda={torch.cuda.is_available()} "
+              f"device={dev}", flush=True)
+        _ = (torch.ones(16) + torch.ones(16)).sum().item()            # torch C ext
+        import torchvision
+        print(f"SELFTEST torchvision={torchvision.__version__}", flush=True)
+        import torchvision.ops as _tvo                                # compiled ops
+        _keep = _tvo.nms(torch.tensor([[0., 0., 10., 10.], [1., 1., 11., 11.]]),
+                         torch.tensor([0.9, 0.8]), 0.5)
+        print(f"SELFTEST torchvision.ops.nms ok keep={_keep.tolist()}", flush=True)
+        from ultralytics import YOLO                                  # the modulefinder path
+        print("SELFTEST ultralytics import ok", flush=True)
+        # Prefer a real model if the user has one; else build from architecture
+        # (no weights, no network) — either way runs a full forward pass.
+        model_ref = "yolov8n.yaml"
+        try:
+            from cctv_yolo.paths import get_models_dir
+            for _name in ("yolov8m.pt", "yolov8n.pt"):
+                _p = get_models_dir() / _name
+                if _p.is_file():
+                    model_ref = str(_p)
+                    break
+        except Exception:
+            pass
+        model = YOLO(model_ref)
+        res = model.predict(np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
+        print(f"SELFTEST inference ok model={model_ref} results={len(res)}", flush=True)
+        print("SELFTEST PASS", flush=True)
+        return 0
+    except BaseException:
+        traceback.print_exc()
+        print("SELFTEST FAIL", flush=True)
+        return 1
+
+
 def main():
     """Application entry point."""
+    # Frozen-build verification hook — see _run_selftest. Runs before any Qt so
+    # it works headlessly under CCTV-YOLO-debug.exe.
+    if os.environ.get("CCTV_YOLO_SELFTEST") == "1":
+        sys.exit(_run_selftest())
+
     # Heavy imports happen here — inside the crash-guarded path (see __main__),
     # so an import failure lands in crash.log instead of vanishing silently.
     from PySide6.QtWidgets import QApplication

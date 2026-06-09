@@ -11,7 +11,7 @@ import ast
 import os
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
 
 sys.setrecursionlimit(10000)
 
@@ -44,9 +44,43 @@ BUNDLE_ID    = _VC["__bundle_id__"]
 ultralytics_datas = collect_data_files('ultralytics')
 ultralytics_hiddenimports = collect_submodules('ultralytics')
 
+# PIL (Pillow): the data-staged torchvision imports MANY PIL submodules that
+# PyInstaller can't see (torchvision is excluded from analysis) — its transforms
+# do `from PIL import Image, ImageEnhance, ImageOps` and torchvision.utils pulls
+# ImageDraw/ImageFont/ImageColor. The old spec only bundled PIL.Image, so the
+# frozen Process path died with "cannot import name 'ImageEnhance' from 'PIL'".
+# collect_all grabs every PIL submodule, its data files, AND its binary
+# extensions (_imaging, _imagingft for ImageFont) in one shot.
+pil_datas, pil_binaries, pil_hiddenimports = collect_all('PIL')
+
 # Pull every cctv_yolo module — tabs are loaded via dynamic imports so
 # PyInstaller's static analysis misses about 30 of them.
 cctv_hiddenimports = collect_submodules('cctv_yolo')
+
+# WHOLE STANDARD LIBRARY. The hybrid Windows build EXCLUDES torch/torchvision
+# from analysis and ships them as a data tree, so PyInstaller never walks their
+# import graph — and they import a LOT of stdlib lazily/indirectly (torchvision
+# alone pulls modulefinder, html.parser, xml.etree, decimal, statistics,
+# secrets, fractions, ...). Chasing each missing module one user-crash at a time
+# is a losing game, so we bundle the entire stdlib (minus dev/GUI/Unix-only
+# packages). It's only a few MB and permanently ends "No module named '<stdlib>'"
+# failures on end-user machines. PyInstaller analyses each name and follows its
+# own C-extension deps (_decimal, _elementtree, pyexpat, ...).
+_STDLIB_SKIP = {
+    'antigravity', 'this', 'idlelib', 'lib2to3', 'test', 'tkinter', 'turtle',
+    'turtledemo', 'ensurepip', 'venv', 'msilib', 'distutils', 'pydoc_data',
+    'nis', 'crypt', 'spwd', 'termios', 'readline', 'curses', '_tkinter',
+}
+_stdlib_hidden = []
+for _m in sorted(getattr(sys, 'stdlib_module_names', ())):
+    if _m in _STDLIB_SKIP or _m.startswith('__'):
+        continue
+    _stdlib_hidden.append(_m)
+    try:
+        _stdlib_hidden += collect_submodules(_m)
+    except Exception:
+        pass
+_stdlib_hidden = sorted(set(_stdlib_hidden))
 
 IS_WIN = sys.platform == 'win32'
 
@@ -131,9 +165,9 @@ else:
 a = Analysis(
     ['cctv_yolo/main.py'],
     pathex=[],
-    binaries=_vc_dlls,
-    datas=ultralytics_datas,
-    hiddenimports=cctv_hiddenimports + ultralytics_hiddenimports + [
+    binaries=_vc_dlls + pil_binaries,
+    datas=ultralytics_datas + pil_datas,
+    hiddenimports=cctv_hiddenimports + ultralytics_hiddenimports + pil_hiddenimports + _stdlib_hidden + [
         'cv2',
         'numpy',
         'tqdm',
@@ -141,6 +175,16 @@ a = Analysis(
         # NOTE: torch/torchvision are added via _torch_extra_hidden below — on
         # Windows they are EXCLUDED from the bundle and shipped as a data tree
         # instead (hybrid GPU packaging), so they must NOT be hardcoded here.
+        #
+        # STDLIB modules that the data-staged torch/torchvision import but which
+        # PyInstaller can't discover (torch/torchvision are excluded from
+        # analysis, so their import graph is never walked). torchvision's
+        # __init__.py line 3 does `from modulefinder import Module`; without
+        # this the frozen build dies the instant `from ultralytics import YOLO`
+        # imports torchvision — i.e. on EVERY "Process" click, CPU or GPU —
+        # with "ModuleNotFoundError: No module named 'modulefinder'".
+        'modulefinder',
+        'colorama',               # tqdm's Windows colour dep, pulled by torchvision
         'PySide6',
         'PySide6.QtCore',
         'PySide6.QtGui',
