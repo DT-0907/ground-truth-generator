@@ -260,19 +260,31 @@ class BatchTree(QWidget):
         return paths
 
     def refresh_statuses(self):
-        """Repaint the status column for currently visible rows."""
-        # The synthetic column doesn't auto-refresh because the FS model
-        # doesn't know its data changed — poke it.
-        top = self.view.indexAt(self.view.rect().topLeft())
-        bot = self.view.indexAt(self.view.rect().bottomLeft())
-        if not top.isValid():
-            return
-        if not bot.isValid():
-            bot = top
-        left = self._model.index(top.row(), STATUS_COLUMN, top.parent())
-        right = self._model.index(bot.row(), STATUS_COLUMN, bot.parent())
-        if left.isValid() and right.isValid():
-            self._model.dataChanged.emit(left, right, [Qt.DisplayRole])
+        """Repaint the Status column for every currently-visible row.
+
+        The synthetic Status column is derived from live queue state the FS
+        model knows nothing about, so we must tell the view its data changed.
+        We walk each visible row (top → bottom, following expansion) and emit a
+        per-row ``dataChanged``. Emitting one ``top → bottom`` range is wrong
+        when the visible rows span multiple parent folders — ``dataChanged``
+        requires topLeft/bottomRight to share a parent, so the range silently
+        no-ops and chips stay "QUEUED". That is exactly the case here: videos
+        live in nested ``loop N/`` subfolders, so each visible run of rows has a
+        different parent.
+        """
+        view = self.view
+        viewport_bottom = view.viewport().rect().bottom()
+        idx = view.indexAt(view.viewport().rect().topLeft())
+        guard = 0
+        while idx.isValid() and guard < 100000:
+            guard += 1
+            status_idx = self._model.index(idx.row(), STATUS_COLUMN, idx.parent())
+            if status_idx.isValid():
+                self._model.dataChanged.emit(status_idx, status_idx, [Qt.DisplayRole])
+            # Stop once we've painted past the bottom of the viewport.
+            if view.visualRect(idx).top() > viewport_bottom:
+                break
+            idx = view.indexBelow(idx)
 
     def expanded_paths(self) -> list[str]:
         """Currently-expanded folder absolute paths (best-effort)."""

@@ -22,28 +22,54 @@ import sys
 # native write lands somewhere valid. MUST run before any torch import — this
 # runtime hook is the very first code in the frozen app.
 if sys.platform == "win32" and getattr(sys, "frozen", False):
+    # stdin -> NUL. stdout/stderr -> a truncate-on-launch logfile (NUL if the
+    # file can't be opened) so native writes during DLL load both SUCCEED
+    # (valid fd 1/2, which is what stops the load from aborting) AND get
+    # captured. The capture matters: torch's "_C folder" message hides the real
+    # underlying DLL error, so a machine that still fails leaves the true cause
+    # in this file for support to read.
+    import tempfile as _tempfile
+    _native_log_path = os.path.join(_tempfile.gettempdir(), "cctv-yolo-native.log")
     try:
         _nul = os.open(os.devnull, os.O_RDWR)
-        for _fd in (0, 1, 2):
-            try:
-                os.fstat(_fd)            # valid (console / redirected) -> keep
-            except OSError:
-                try:
-                    os.dup2(_nul, _fd)   # invalid (windowed) -> point at NUL
-                except OSError:
-                    pass
-        if _nul > 2:
-            os.close(_nul)
     except Exception:
-        pass
+        _nul = None
+    try:
+        _logfd = os.open(_native_log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    except Exception:
+        _logfd = _nul
+
+    def _bind_fd(_fd, _target):
+        if _target is None:
+            return
+        try:
+            os.fstat(_fd)                # valid (console / redirected) -> keep
+        except OSError:
+            try:
+                os.dup2(_target, _fd)    # invalid (windowed) -> point at target
+            except OSError:
+                pass
+
+    _bind_fd(0, _nul)
+    _bind_fd(1, _logfd)
+    _bind_fd(2, _logfd)
+    for _extra in {_nul, _logfd}:
+        if _extra is not None and _extra > 2:
+            try:
+                os.close(_extra)
+            except OSError:
+                pass
     # Keep the Python-level streams non-None too, so pure-Python writes in the
     # import chain (warnings, tqdm, print) don't raise on None either.
     for _name in ("stdout", "stderr"):
         if getattr(sys, _name, None) is None:
             try:
-                setattr(sys, _name, open(os.devnull, "w"))
+                setattr(sys, _name, open(_native_log_path, "a", buffering=1))
             except Exception:
-                pass
+                try:
+                    setattr(sys, _name, open(os.devnull, "w"))
+                except Exception:
+                    pass
     if getattr(sys, "stdin", None) is None:
         try:
             sys.stdin = open(os.devnull, "r")

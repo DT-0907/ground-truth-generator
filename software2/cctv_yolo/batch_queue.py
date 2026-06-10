@@ -37,6 +37,21 @@ from PySide6.QtCore import QObject, QThread, QThreadPool, Signal
 QUEUE_FILENAME = "batch_queue.json"
 
 
+def _canon_path(p: str) -> str:
+    """Canonical key for comparing two spellings of the same file path.
+
+    ``os.path.realpath`` collapses ``/`` vs ``\\`` and resolves Windows 8.3
+    short names (e.g. ``DELBER~1`` -> ``delberttran``); ``normcase`` folds case
+    on Windows. Without this the queue's stored path and Qt's
+    ``QFileSystemModel`` path (which uses ``/``) never match, leaving the
+    Batch tree's status chips stuck on "queued".
+    """
+    try:
+        return os.path.normcase(os.path.realpath(p))
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.normpath(p))
+
+
 class BatchQueueStore:
     """File-backed queue store. Pure data layer, no Qt."""
 
@@ -341,12 +356,26 @@ class BatchQueueManager(QObject):
                 return it["status"]
         return None
 
+    def item_for_path(self, abs_path: str) -> Optional[dict]:
+        """Find the queue item for a video by absolute path, robust to path
+        spelling. Qt's QFileSystemModel hands us forward-slash paths
+        (``C:/dir/x.mp4``) while we store the OS-native form (``C:\\dir\\x.mp4``);
+        a raw ``==`` never matches, which is why the status chip used to stay
+        stuck on "queued". Normalize separators + case on both sides.
+        """
+        if not abs_path:
+            return None
+        target = _canon_path(abs_path)
+        for it in self.items:
+            vp = it.get("video_path")
+            if vp and _canon_path(vp) == target:
+                return it
+        return None
+
     def status_for_path(self, abs_path: str) -> str:
         """Lookup status by absolute video path (used by the tree's status column)."""
-        for it in self.items:
-            if it.get("video_path") == abs_path:
-                return it.get("status", "queued")
-        return ""
+        it = self.item_for_path(abs_path)
+        return it.get("status", "queued") if it else ""
 
     # ----- Worker pool sizing -----
     def set_max_workers(self, n: int):
@@ -584,21 +613,54 @@ class BatchQueueManager(QObject):
 
     # ----- Shutdown -----
     def shutdown(self):
-        """Best-effort shutdown for app close.
+        """Stop everything safely when the window/app is closed.
 
-        Mark active jobs as queued (so resume-on-crash logic will retry),
-        request cooperative cancel, then wait briefly for the pool.
+        Behaviour the user asked for: closing the tab/window stops all
+        background processing *and* any video that was mid-process gets its
+        partial data deleted so it is treated as un-processed and can be
+        re-run cleanly next launch.
+
+          1. Stop the watch folder and drop everything still pending in the
+             pool (nothing new starts).
+          2. Ask in-flight runnables to cancel, then wait for them to stop at
+             their next frame boundary.
+          3. For each job that was in flight, delete its partial
+             ``tracks/<sid>.json`` and wind the item back to ``queued`` (so it
+             re-runs from scratch later, never half-done).
         """
         self.stop_watch_folder()
-        for sid, runnable in list(self._active.items()):
+        self._run_active = False
+        self._cancel_all_active = True
+        # Nothing new should launch.
+        try:
+            self._pool.clear()
+        except Exception:
+            pass
+        # Cooperative cancel for everything in flight.
+        active_ids = list(self._active.keys())
+        for sid in active_ids:
+            runnable = self._active.get(sid)
             try:
                 runnable.cancel()
             except Exception:
                 pass
+        # Give in-flight runnables time to notice the cancel flag and unwind.
+        self._pool.waitForDone(5000)
+        # Clean up partial output and mark each interrupted job re-runnable.
+        # We do this directly (not via the cancelled signal) because the event
+        # loop is tearing down on app close and queued signals may never fire.
+        for sid in active_ids:
+            try:
+                partial = Path(self.dm.tracks_dir) / f"{sid}.json"
+                partial.unlink(missing_ok=True)
+            except OSError:
+                pass
             for it in self.items:
                 if it["session_id"] == sid:
                     it["status"] = "queued"
+                    it["progress"] = 0
+                    it["error"] = None
                     break
+        self._active.clear()
+        self._cancelled_ids.clear()
         self._persist()
-        # Give in-flight runnables ~3s to notice the cancel flag.
-        self._pool.waitForDone(3000)

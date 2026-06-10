@@ -452,10 +452,9 @@ class BatchTab(QWidget):
 
     def _on_file_activated(self, abs_path: str):
         # Double-click on a video row → open review for it (if it has tracks).
-        for it in self.queue.items:
-            if it.get("video_path") == abs_path and it.get("status") == "done":
-                self.review_requested.emit(it["session_id"])
-                return
+        it = self.queue.item_for_path(abs_path)
+        if it is not None and it.get("status") == "done":
+            self.review_requested.emit(it["session_id"])
 
     def _on_expansion_changed(self, expanded: list[str]):
         if self._active_folder is None:
@@ -528,10 +527,10 @@ class BatchTab(QWidget):
         if not paths:
             return
         target = paths[0]
-        for it in self.queue.items:
-            if it.get("video_path") == target and it.get("status") == "done":
-                self.review_requested.emit(it["session_id"])
-                return
+        it = self.queue.item_for_path(target)
+        if it is not None and it.get("status") == "done":
+            self.review_requested.emit(it["session_id"])
+            return
         QMessageBox.information(
             self, "Review",
             "Selected video isn't processed yet. Start the batch first.",
