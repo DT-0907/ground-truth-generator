@@ -20,7 +20,7 @@ import torch
 from PySide6.QtCore import QThread, Signal
 
 
-VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 1: "bicycle"}
+from cctv_yolo import classes as class_registry
 
 
 def _device():
@@ -89,6 +89,7 @@ def run_model_track(
     model = YOLO(str(local) if local.exists() else model_path)
     dev = _device()
     model.to(dev)
+    _filt, _names = class_registry.detect_mapping_for_model(model)
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -99,7 +100,7 @@ def run_model_track(
     results = model.track(
         source=str(video_path),
         conf=conf,
-        classes=list(VEHICLE_CLASSES.keys()),
+        classes=_filt,
         tracker="bytetrack.yaml",
         stream=True,
         device=dev,
@@ -127,7 +128,7 @@ def run_model_track(
             tid = int(boxes.id[i].item())
             conf_v = float(boxes.conf[i].item())
             cid = int(boxes.cls[i].item())
-            cname = VEHICLE_CLASSES.get(cid, "unknown")
+            cname = _names.get(cid, "unknown")
             if processing_roi is not None:
                 bbox_xyxy = boxes.xyxy[i].cpu().numpy().tolist()
                 if not _bbox_center_in_roi(bbox_xyxy, processing_roi):
@@ -368,9 +369,6 @@ def run_model_on_val_split(
                 for j in range(len(r0.boxes)):
                     cid = int(r0.boxes.cls[j].item())
                     name = names_map.get(cid, f"cls_{cid}")
-                    # Map COCO ids to our short names where applicable
-                    if name in ("car",) or name in VEHICLE_CLASSES.values():
-                        pass
                     bbox = r0.boxes.xyxy[j].cpu().numpy().tolist()
                     pred_list.append({"class": name, "bbox": bbox})
 

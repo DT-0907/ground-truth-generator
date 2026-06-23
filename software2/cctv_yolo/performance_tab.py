@@ -78,7 +78,30 @@ from cctv_yolo.widgets.open_location_bar import OpenLocationBar, open_path
 
 logger = logging.getLogger(__name__)
 
-VEHICLE_ORDER = ["car", "truck", "bus", "motorcycle", "bicycle"]
+def _class_order(*count_dicts) -> list[str]:
+    """Display order for per-class stats: the active class set's names, plus
+    any extra class present in the supplied count dicts (so sessions labeled
+    under a different/older class set still show their classes)."""
+    from cctv_yolo import classes as class_registry
+    order = list(class_registry.class_names())
+    seen = set(order)
+    for d in count_dicts:
+        for k in (d or {}):
+            if k not in seen:
+                order.append(k)
+                seen.add(k)
+    return order
+
+
+def _disp(name: str) -> str:
+    """Human label for a class name. Leaves multi-word / already-capitalised
+    names (e.g. ``Class 5: 2-Axle ...``) untouched; only title-cases simple
+    lowercase tokens like ``car`` -> ``Car``."""
+    if not name:
+        return name
+    if " " in name or any(c.isupper() for c in name):
+        return name
+    return name.capitalize()
 
 
 # ---------------------------------------------------------------------------
@@ -261,8 +284,10 @@ QTextEdit {{
 # ---------------------------------------------------------------------------
 
 def _vehicle_color(cls: str) -> str:
-    """Look up the CLASS_COLORS dict with a graceful fallback."""
-    return CLASS_COLORS.get(cls, ACCENT)
+    """Class accent color — consults the active class set (via theme.class_color)
+    then the theme defaults, with a graceful fallback."""
+    from cctv_yolo.theme import class_color
+    return class_color(cls) or ACCENT
 
 
 def _ui_state_path(data_manager) -> Path:
@@ -1141,15 +1166,11 @@ class PerformanceTab(QWidget):
         )
         self._stat_cards_row.addWidget(total_card["frame"])
 
-        for cls in VEHICLE_ORDER:
+        for cls in _class_order(class_counts):
             count = class_counts.get(cls, 0)
-            card = self._make_stat_card(cls.capitalize(), str(count),
+            card = self._make_stat_card(_disp(cls), str(count),
                                         color=_vehicle_color(cls))
             self._stat_cards_row.addWidget(card["frame"])
-        for cls, count in sorted(class_counts.items()):
-            if cls not in VEHICLE_ORDER:
-                card = self._make_stat_card(cls.capitalize(), str(count))
-                self._stat_cards_row.addWidget(card["frame"])
 
         # --- Vehicle type breakdown table ---
         sec1 = QLabel("Vehicle Type Breakdown")
@@ -1169,17 +1190,14 @@ class PerformanceTab(QWidget):
 
         total = stats.get("total_tracks", 0) or 1
         all_classes: list[tuple[str, int]] = []
-        for cls in VEHICLE_ORDER:
+        for cls in _class_order(class_counts):
             if cls in class_counts:
-                all_classes.append((cls, class_counts[cls]))
-        for cls in sorted(class_counts.keys()):
-            if cls not in VEHICLE_ORDER:
                 all_classes.append((cls, class_counts[cls]))
 
         type_table.setRowCount(len(all_classes))
         for row, (cls, count) in enumerate(all_classes):
             pct = (count / total) * 100.0
-            t = QTableWidgetItem(cls.capitalize())
+            t = QTableWidgetItem(_disp(cls))
             c = QTableWidgetItem(str(count))
             c.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             p = QTableWidgetItem(f"{pct:.1f}%")
@@ -1197,7 +1215,8 @@ class PerformanceTab(QWidget):
             sec2.setStyleSheet(SECTION_LABEL)
             self._tables_layout.addWidget(sec2)
 
-            cols = ["ROI Name", "Type", "Total"] + [v.capitalize() for v in VEHICLE_ORDER]
+            roi_order = _class_order(*(r.get("by_class", {}) for r in roi_counts))
+            cols = ["ROI Name", "Type", "Total"] + [_disp(v) for v in roi_order]
             self.roi_table = QTableWidget()
             self.roi_table.setStyleSheet(TABLE_STYLE)
             self.roi_table.setColumnCount(len(cols))
@@ -1218,7 +1237,7 @@ class PerformanceTab(QWidget):
                 t.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.roi_table.setItem(row, 2, t)
                 by_class = roi.get("by_class", {})
-                for ci, v in enumerate(VEHICLE_ORDER):
+                for ci, v in enumerate(roi_order):
                     vc = by_class.get(v, 0)
                     item = QTableWidgetItem(str(vc) if vc else "-")
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1262,9 +1281,11 @@ class PerformanceTab(QWidget):
         )
         self._stat_cards_row.addWidget(total_card["frame"])
 
-        for cls in VEHICLE_ORDER:
+        group_order = _class_order(agg["class_counts"],
+                                   *(r["by_class"] for r in agg["rows"]))
+        for cls in group_order:
             count = agg["class_counts"].get(cls, 0)
-            card = self._make_stat_card(cls.capitalize(), str(count),
+            card = self._make_stat_card(_disp(cls), str(count),
                                         color=_vehicle_color(cls))
             self._stat_cards_row.addWidget(card["frame"])
 
@@ -1279,7 +1300,7 @@ class PerformanceTab(QWidget):
         self._tables_layout.addWidget(sec1)
 
         cols = ["Session", "Tracks", "Mean Conf", "Corrected?"] + \
-               [v.capitalize() for v in VEHICLE_ORDER]
+               [_disp(v) for v in group_order]
         tbl = QTableWidget()
         tbl.setStyleSheet(TABLE_STYLE)
         tbl.setColumnCount(len(cols))
@@ -1299,7 +1320,7 @@ class PerformanceTab(QWidget):
             mc.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             tbl.setItem(r, 2, mc)
             tbl.setItem(r, 3, QTableWidgetItem("Yes" if row["has_corrections"] else "-"))
-            for ci, v in enumerate(VEHICLE_ORDER):
+            for ci, v in enumerate(group_order):
                 vc = row["by_class"].get(v, 0)
                 cell = QTableWidgetItem(str(vc) if vc else "-")
                 cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1571,13 +1592,15 @@ class PerformanceTab(QWidget):
                 w.writerow([])
                 roi_counts = self._current_stats.get("roi_counts", [])
                 if roi_counts:
+                    csv_order = _class_order(
+                        class_counts, *(r.get("by_class", {}) for r in roi_counts))
                     w.writerow(["ROI Counts"])
                     w.writerow(["ROI Name", "Type", "Total"] +
-                               [v.capitalize() for v in VEHICLE_ORDER])
+                               [_disp(v) for v in csv_order])
                     for roi in roi_counts:
                         by_class = roi.get("by_class", {})
                         row = [roi["name"], roi["type"].capitalize(), roi["count"]]
-                        row += [by_class.get(v, 0) for v in VEHICLE_ORDER]
+                        row += [by_class.get(v, 0) for v in csv_order]
                         w.writerow(row)
             QMessageBox.information(
                 self, "Export Complete",
@@ -1611,14 +1634,17 @@ class PerformanceTab(QWidget):
                 for cls, count in sorted(self._current_stats.get("class_counts", {}).items()):
                     w.writerow([cls.capitalize(), count])
                 w.writerow([])
+                grp_order = _class_order(
+                    self._current_stats.get("class_counts", {}),
+                    *(r["by_class"] for r in rows))
                 w.writerow(["Per-Session Breakdown"])
                 w.writerow(["Session", "Tracks", "Mean Conf", "Corrected?"] +
-                           [v.capitalize() for v in VEHICLE_ORDER])
+                           [_disp(v) for v in grp_order])
                 for r in rows:
                     w.writerow([r["video_name"], r["total_tracks"],
                                 f"{r['mean_conf']:.3f}",
                                 "Yes" if r["has_corrections"] else "No"] +
-                               [r["by_class"].get(v, 0) for v in VEHICLE_ORDER])
+                               [r["by_class"].get(v, 0) for v in grp_order])
             QMessageBox.information(
                 self, "Export Complete",
                 f"Group stats exported to:\n{path}",
@@ -1955,10 +1981,13 @@ class PerformanceTab(QWidget):
         self.confusion_status.setText("Computing...")
         self.btn_compute_confusion.setEnabled(False)
 
+        gt_classes = {(tr.get("class") or "").strip()
+                      for tr in (corr or {}).get("tracks", [])}
+        axis = _class_order({c: 1 for c in gt_classes if c})
         worker = _ConfusionWorker(
             predictions=raw,
             ground_truth=corr,
-            classes=VEHICLE_ORDER,
+            classes=axis,
             iou_threshold=0.5,
             roi_filter=roi,
         )

@@ -25,7 +25,7 @@ import torch
 from PySide6.QtCore import QThread, Signal
 
 
-VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 1: "bicycle"}
+from cctv_yolo import classes as class_registry
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +108,7 @@ def run_predictions(
     local = Path(models_dir) / model_path
     model = YOLO(str(local) if local.exists() else model_path)
     model.to(_device())
+    _filt, _names = class_registry.detect_mapping_for_model(model)
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -118,7 +119,7 @@ def run_predictions(
     results = model.predict(
         source=str(video_path),
         conf=conf,
-        classes=list(VEHICLE_CLASSES.keys()),
+        classes=_filt,
         stream=True,
         verbose=False,
         vid_stride=stride,
@@ -131,7 +132,7 @@ def run_predictions(
         frame_idx = idx * stride
         for i in range(len(r.boxes)):
             cid = int(r.boxes.cls[i].item())
-            cname = VEHICLE_CLASSES.get(cid, "unknown")
+            cname = _names.get(cid, "unknown")
             bbox = r.boxes.xyxy[i].cpu().numpy().tolist()
             out[frame_idx].append({"bbox": bbox, "class": cname})
         if progress_callback and total > 0:

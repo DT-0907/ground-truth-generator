@@ -130,7 +130,8 @@ class CrossSessionSearchDialog(QDialog):
 
         f_layout.addWidget(QLabel("Class:"))
         self.cls = QComboBox()
-        self.cls.addItems(["any", "car", "truck", "bus", "motorcycle", "bicycle"])
+        from cctv_yolo import classes as class_registry
+        self.cls.addItems(["any"] + list(class_registry.class_names()))
         f_layout.addWidget(self.cls)
 
         f_layout.addWidget(QLabel("ROI name:"))

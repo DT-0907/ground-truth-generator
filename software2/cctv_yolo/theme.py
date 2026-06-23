@@ -105,6 +105,15 @@ def class_color(class_name: str | None) -> str:
     """
     if not class_name:
         return CLASS_COLORS["unknown"]
+    # Prefer the active class set's color so custom / FHWA classes are painted
+    # correctly. Lazy import avoids a circular dependency (classes imports theme).
+    try:
+        from cctv_yolo.classes import color_for
+        c = color_for(class_name)
+        if c:
+            return c
+    except Exception:
+        pass
     return CLASS_COLORS.get(class_name.lower(), CLASS_COLORS["unknown"])
 
 

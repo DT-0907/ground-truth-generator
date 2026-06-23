@@ -465,6 +465,26 @@ class PreprocessingTab(QWidget):
         model_row.addStretch()
         layout.addLayout(model_row)
 
+        # --- Class set picker row ---
+        class_row = QHBoxLayout()
+        class_row.setSpacing(10)
+        class_row.addWidget(QLabel("Classes:"))
+        self.class_combo = QComboBox()
+        self.class_combo.setStyleSheet(CONTROLS_STYLE)
+        self.class_combo.setMinimumWidth(220)
+        self.class_combo.setToolTip(
+            "Which object classes detection labels and you relabel/train into. "
+            "Add Pedestrian, FHWA 13, or your own via Manage.")
+        self.class_combo.currentIndexChanged.connect(self._on_class_set_changed)
+        class_row.addWidget(self.class_combo)
+        self.btn_manage_classes = QPushButton("Manage...")
+        self.btn_manage_classes.setStyleSheet(BROWSE_BTN)
+        self.btn_manage_classes.clicked.connect(self._open_class_manager)
+        class_row.addWidget(self.btn_manage_classes)
+        class_row.addStretch()
+        layout.addLayout(class_row)
+        self._populate_class_sets()
+
         # --- Model metadata line (D2-11) ---
         self.lbl_model_meta = QLabel("")
         self.lbl_model_meta.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
@@ -661,6 +681,34 @@ class PreprocessingTab(QWidget):
         vbox.addWidget(val, stretch=1)
 
         return {"frame": frame, "value_label": val}
+
+    # ------------------------------------------------------------------
+    # Class set picker
+    # ------------------------------------------------------------------
+
+    def _populate_class_sets(self):
+        from cctv_yolo import classes as class_registry
+        self.class_combo.blockSignals(True)
+        self.class_combo.clear()
+        active = class_registry.active_id()
+        target = 0
+        for i, s in enumerate(class_registry.list_sets()):
+            self.class_combo.addItem(s["name"], s["id"])
+            if s["id"] == active:
+                target = i
+        self.class_combo.setCurrentIndex(target)
+        self.class_combo.blockSignals(False)
+
+    def _on_class_set_changed(self, _idx):
+        from cctv_yolo import classes as class_registry
+        sid = self.class_combo.currentData()
+        if sid:
+            class_registry.set_active(sid)
+
+    def _open_class_manager(self):
+        from cctv_yolo.widgets.class_set_dialog import ClassSetDialog
+        ClassSetDialog(self).exec()
+        self._populate_class_sets()
 
     # ------------------------------------------------------------------
     # Model picker

@@ -39,7 +39,12 @@ def discover_classes(data_manager) -> list[str]:
     correction (falls back to ``_COMMON_CLASSES`` if none exist)."""
     found: list[str] = []
     seen: set[str] = set()
-    for c in _COMMON_CLASSES:
+    try:
+        from cctv_yolo import classes as class_registry
+        seed = list(class_registry.class_names()) or _COMMON_CLASSES
+    except Exception:
+        seed = _COMMON_CLASSES
+    for c in seed:
         if c not in seen:
             found.append(c)
             seen.add(c)

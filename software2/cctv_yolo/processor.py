@@ -90,16 +90,6 @@ def _get_device():
     return info.device
 
 
-# COCO vehicle class IDs
-VEHICLE_CLASSES = {
-    2: 'car',
-    3: 'motorcycle',
-    5: 'bus',
-    7: 'truck',
-    1: 'bicycle'
-}
-
-
 def _point_in_polygon(px, py, polygon):
     """Ray-casting point-in-polygon test."""
     n = len(polygon)
@@ -221,6 +211,12 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
     )
     print(f"Model loaded on device: {device}")
 
+    # Resolve which classes to detect and how to name them. For a stock COCO
+    # model this filters to the active class set's COCO seeds; for a custom
+    # model it reads the model's own class names. (cctv_yolo.classes)
+    from cctv_yolo import classes as class_registry
+    _class_filter, _id_to_name = class_registry.detect_mapping_for_model(model)
+
     # Open video
     try:
         cap = cv2.VideoCapture(str(video_path))
@@ -254,7 +250,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
         results = model.track(
             source=str(video_path),
             conf=conf_threshold,
-            classes=list(VEHICLE_CLASSES.keys()),
+            classes=_class_filter,
             tracker="bytetrack.yaml",
             stream=True,
             device=device,
@@ -323,7 +319,7 @@ def process_video(video_path: str, output_dir: str = "data/tracks",
                 bbox = boxes.xyxy[i].cpu().numpy().tolist()
                 conf = float(boxes.conf[i].item())
                 class_id = int(boxes.cls[i].item())
-                class_name = VEHICLE_CLASSES.get(class_id, 'unknown')
+                class_name = _id_to_name.get(class_id, 'unknown')
 
                 # Filter by processing ROI if defined
                 if processing_roi and not _bbox_center_in_roi(bbox, processing_roi):

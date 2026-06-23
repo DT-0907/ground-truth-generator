@@ -244,8 +244,21 @@ class TrackSidebar(QWidget):
         filter_layout.setContentsMargins(15, 10, 15, 10)
         filter_layout.setSpacing(6)
         self._filter_buttons = {}
-        for name in ["all", "visible", "review", "car", "truck", "bus"]:
-            btn = QPushButton(name.capitalize())
+        from cctv_yolo import classes as class_registry
+        # Quick filters: the three special views + the active class set's
+        # classes (capped so a 13-class set doesn't overflow the bar). The
+        # button *label* is shortened but the filter *key* stays the full
+        # class name so it matches track["class"] exactly.
+        _specials = ["all", "visible", "review"]
+        _class_filters = list(class_registry.class_names())[:6]
+        for name in _specials + _class_filters:
+            if name in _specials:
+                label = name.capitalize()
+            elif ":" in name:
+                label = name.split(":")[0].strip()
+            else:
+                label = name.capitalize()
+            btn = QPushButton(label)
             btn.setStyleSheet("""
                 QPushButton { padding: 4px 8px; border: 1px solid ; border-radius: 4px;
                               background: transparent; color: #888; font-size: 11px; }

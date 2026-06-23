@@ -5,8 +5,17 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                 QComboBox, QPushButton, QLineEdit, QFormLayout)
 from PySide6.QtCore import Qt
 from cctv_yolo.theme import BORDER, INDIGO, OFFWHITE, PANEL, PANEL_HI, PINK, PURPLE, YELLOW
+from cctv_yolo import classes as class_registry
 
-VEHICLE_CLASSES = ["car", "truck", "bus", "motorcycle", "bicycle"]
+
+def _class_names(current: str | None = None) -> list[str]:
+    """Class names from the active class set. If ``current`` is supplied and not
+    in the set, it's prepended so a track labeled under a different/older set
+    isn't silently changed when the dialog opens."""
+    names = list(class_registry.class_names())
+    if current and current not in names:
+        names = [current] + names
+    return names or ["car"]
 
 # Finer-grained subclasses keyed by primary class. Used to refine
 # annotations beyond the COCO supercategory. ``""`` means "unspecified".
@@ -85,8 +94,9 @@ class ClassChangeDialog(QDialog):
 
         layout.addWidget(QLabel("Vehicle class:"))
         self.combo = QComboBox()
-        self.combo.addItems(VEHICLE_CLASSES)
-        idx = VEHICLE_CLASSES.index(current_class) if current_class in VEHICLE_CLASSES else 0
+        names = _class_names(current_class)
+        self.combo.addItems(names)
+        idx = names.index(current_class) if current_class in names else 0
         self.combo.setCurrentIndex(idx)
         self.combo.currentTextChanged.connect(self._reload_subclasses)
         layout.addWidget(self.combo)
@@ -210,7 +220,7 @@ class NewTrackDialog(QDialog):
         layout.addWidget(QLabel("Select vehicle class:"))
 
         self.combo = QComboBox()
-        self.combo.addItems(VEHICLE_CLASSES)
+        self.combo.addItems(_class_names())
         layout.addWidget(self.combo)
 
         btn_layout = QHBoxLayout()

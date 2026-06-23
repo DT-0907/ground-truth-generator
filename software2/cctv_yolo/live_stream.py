@@ -33,7 +33,7 @@ from PySide6.QtGui import QImage
 from cctv_yolo.alerts import AlertEngine
 
 
-VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 1: "bicycle"}
+from cctv_yolo import classes as class_registry
 
 # Bounding-box colors — Correction's spec: PURPLE default, PINK for selected.
 # Live has no "selected" track, so all boxes use PURPLE. The values below are
@@ -477,12 +477,15 @@ class LiveStreamWorker(QThread):
             local_a = self.models_dir / self.model_path
             model_a = YOLO(str(local_a) if local_a.exists() else self.model_path)
             model_a.to(_device())
+            _filt_a, _names_a = class_registry.detect_mapping_for_model(model_a)
 
             model_b = None
+            _filt_b, _names_b = None, {}
             if self.model_b_path:
                 local_b = self.models_dir / self.model_b_path
                 model_b = YOLO(str(local_b) if local_b.exists() else self.model_b_path)
                 model_b.to(_device())
+                _filt_b, _names_b = class_registry.detect_mapping_for_model(model_b)
 
             cap = self._open_capture()
             if cap is None:
@@ -560,7 +563,7 @@ class LiveStreamWorker(QThread):
                 results_a = model_a.track(
                     source=frame,
                     conf=self.conf,
-                    classes=list(VEHICLE_CLASSES.keys()),
+                    classes=_filt_a,
                     persist=True,
                     tracker="bytetrack.yaml",
                     verbose=False,
@@ -569,7 +572,7 @@ class LiveStreamWorker(QThread):
                 infer_ema_a = infer_ms_a if infer_ema_a == 0 else (
                     EMA * infer_ms_a + (1 - EMA) * infer_ema_a
                 )
-                detections_a = _detections_from_results(results_a, VEHICLE_CLASSES)
+                detections_a = _detections_from_results(results_a, _names_a)
 
                 # ---- Model B inference (every Nth frame) ----
                 detections_b: list[dict] = []
@@ -579,7 +582,7 @@ class LiveStreamWorker(QThread):
                     results_b = model_b.track(
                         source=frame,
                         conf=self.conf,
-                        classes=list(VEHICLE_CLASSES.keys()),
+                        classes=_filt_b,
                         persist=True,
                         tracker="bytetrack.yaml",
                         verbose=False,
@@ -588,7 +591,7 @@ class LiveStreamWorker(QThread):
                     infer_ema_b = infer_ms_b if infer_ema_b == 0 else (
                         EMA * infer_ms_b + (1 - EMA) * infer_ema_b
                     )
-                    detections_b = _detections_from_results(results_b, VEHICLE_CLASSES)
+                    detections_b = _detections_from_results(results_b, _names_b)
 
                 # ---- ROI counts + events (model A only — A is the authoritative one) ----
                 with self._lock:
