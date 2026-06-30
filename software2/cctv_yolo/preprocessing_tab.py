@@ -702,8 +702,18 @@ class PreprocessingTab(QWidget):
     def _on_class_set_changed(self, _idx):
         from cctv_yolo import classes as class_registry
         sid = self.class_combo.currentData()
-        if sid:
+        if not sid:
+            return
+        try:
             class_registry.set_active(sid)
+        except Exception as e:
+            # Almost always a transient Windows file lock that survived the
+            # retry. Don't crash the picker — tell the user what to do.
+            QMessageBox.warning(
+                self, "Couldn't switch class set",
+                f"Couldn't save the active class set:\n{e}\n\n"
+                "If this persists, pause OneDrive sync on the data folder or "
+                "exclude it from antivirus scanning.")
 
     def _open_class_manager(self):
         from cctv_yolo.widgets.class_set_dialog import ClassSetDialog

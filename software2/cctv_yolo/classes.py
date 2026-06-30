@@ -29,7 +29,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -134,9 +136,39 @@ def _config_path() -> Path:
 def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # On Windows the destination may be transiently locked by OneDrive,
+        # Windows Search, or antivirus, so os.replace() raises PermissionError
+        # (WinError 5/32). The lock usually clears within a few hundred ms —
+        # retry with backoff. No-op on POSIX. (Mirrors data_manager's writer.)
+        last_err: Exception | None = None
+        for attempt in range(6):       # ~1.55s total across retries
+            try:
+                os.replace(tmp, path)
+                last_err = None
+                break
+            except PermissionError as e:
+                last_err = e
+                if sys.platform != "win32":
+                    raise
+                if attempt < 5:
+                    time.sleep(0.05 * (2 ** attempt))
+        if last_err is not None:
+            logger.error(
+                "class_sets.json rename failed after retries (%s). Usually "
+                "OneDrive/Search/antivirus holding the file.", last_err)
+            raise last_err
+    except Exception:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _load() -> dict:

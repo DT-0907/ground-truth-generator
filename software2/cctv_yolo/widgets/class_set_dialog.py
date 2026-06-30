@@ -269,7 +269,11 @@ class ClassSetDialog(QDialog):
         if not classes:
             QMessageBox.warning(self, "No classes", "Add at least one class.")
             return
-        class_registry.update_set(sid, name=self.name_edit.text(), classes=classes)
+        try:
+            class_registry.update_set(sid, name=self.name_edit.text(), classes=classes)
+        except Exception as e:
+            QMessageBox.warning(self, "Couldn't save", self._write_err(e))
+            return
         self._reload_list(select=sid)
         QMessageBox.information(self, "Saved", "Class set saved.")
 
@@ -277,5 +281,15 @@ class ClassSetDialog(QDialog):
         sid = self._selected_set_id()
         if not sid:
             return
-        class_registry.set_active(sid)
+        try:
+            class_registry.set_active(sid)
+        except Exception as e:
+            QMessageBox.warning(self, "Couldn't set active", self._write_err(e))
+            return
         self._reload_list(select=sid)
+
+    @staticmethod
+    def _write_err(e: Exception) -> str:
+        return (f"Couldn't write the class set file:\n{e}\n\n"
+                "If this persists, pause OneDrive sync on the data folder or "
+                "exclude it from antivirus scanning.")
